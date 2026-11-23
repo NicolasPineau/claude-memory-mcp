@@ -2,7 +2,7 @@
 
 A personal, long-term memory for Claude, shared across all your accounts, devices and conversations.
 
-It is a single-file [MCP](https://modelcontextprotocol.io) server running on **Cloudflare Workers**, with its data stored in **Cloudflare D1** (SQLite). Add it as a custom connector in Claude, and every conversation can recall and save notes, projects, tags and small files — whichever Claude account you use.
+It is an [MCP](https://modelcontextprotocol.io) server running on **Cloudflare Workers**, with its data stored in **Cloudflare D1** (SQLite). Add it as a custom connector in Claude, and every conversation can recall and save notes, projects, tags and small files — whichever Claude account you use.
 
 Tool names are in English; tool descriptions, parameters and server instructions are in French.
 
@@ -62,23 +62,15 @@ Copy the `database_id` it prints. You don't need to create the tables: the Worke
 
 ### 2. Configure the Worker
 
-Create a `wrangler.toml` next to `worker.js`:
+Edit `wrangler.toml`: set the Worker `name`, and the D1 `database_name` and `database_id`.
 
-```toml
-name = "claude-memory"
-main = "worker.js"
-compatibility_date = "2025-11-01"
+Then set these variables in the Cloudflare dashboard (**Worker → Settings → Variables and Secrets**). Because `wrangler.toml` has `keep_vars = true`, deployments leave them untouched:
 
-[[d1_databases]]
-binding = "DB"                     # must be exactly "DB"
-database_name = "claude-memory"
-database_id = "<your-database-id>"
-
-[vars]
-ACCESS_TEAM_DOMAIN = "https://<your-team>.cloudflareaccess.com"
-ACCESS_AUD = "<application-audience-tag>"
-ADMIN_EMAILS = "you@example.com"   # comma-separated
-```
+| Variable | Example |
+|---|---|
+| `ACCESS_TEAM_DOMAIN` | `https://<your-team>.cloudflareaccess.com` |
+| `ACCESS_AUD` | the Access application's Audience (AUD) Tag |
+| `ADMIN_EMAILS` | `you@example.com` (comma-separated) |
 
 ### 3. Set the connector secret
 
@@ -92,9 +84,14 @@ Keep it somewhere safe: it is part of your connector URL, and anyone who has it 
 
 ### 4. Deploy
 
+Either deploy from your machine:
+
 ```sh
-wrangler deploy
+npm install
+npm run deploy
 ```
+
+Or let Cloudflare deploy on every push (recommended). In the dashboard, open the Worker, go to **Settings → Build**, connect this GitHub repository, and keep `main` as the production branch. Every push to `main` then runs `npx wrangler deploy`. You can also enable builds for other branches to get preview versions without touching production.
 
 ### 5. Protect `/admin` with Cloudflare Access
 
@@ -120,6 +117,16 @@ Do the same on every Claude account that should share this memory.
 - The MCP endpoint is protected by the secret in its URL, compared in constant time. Treat the full URL like a password.
 - Upload and download links are random, single-purpose tokens that expire.
 - Don't store passwords or other secrets in the memory. The built-in instructions also tell Claude not to.
+
+## Development
+
+```sh
+npm install
+npm test        # Vitest, inside the Workers runtime, with a local D1
+npm run dev     # run the Worker locally
+```
+
+The code lives in `src/`, split by concern (MCP protocol, tools per domain, storage, admin). See [AGENTS.md](AGENTS.md) for the layout and conventions.
 
 ## Credits
 
