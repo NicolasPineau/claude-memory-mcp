@@ -44,10 +44,11 @@ Périmètre validé avec l'utilisateur lors d'une interview. Priorité : les rap
 
 - Un Cron Trigger du Worker envoie les alertes à l'heure de l'échéance. Sans heure : heure fixe le matin, réglable dans `/admin` (ex. 8 h).
 - Android, app ntfy : priorité max + option « continuer à alerter » pour l'alarme des tâches critiques.
-- Boutons d'action sur la notification :
+- Boutons d'action sur la notification (ntfy : 3 boutons maximum) :
   - **Fait** : action `http` vers le Worker ;
-  - **Reporter** : choix paramétrables dans `/admin` (au départ +1 h, ce soir 18 h, demain matin, +1 semaine) ;
-  - **Modifier** : action `view` qui ouvre une petite page mobile d'édition (ntfy ne permet pas de saisir du texte dans la notification).
+  - **Vu** : action `http`, accuse réception (arrête les relances), la tâche reste à faire ;
+  - **Repousser…** : action `view` qui ouvre la page mobile sur les choix de report, paramétrables dans `/admin` (au départ +1 h, ce soir 18 h, demain matin, +1 semaine). Repousser **décale l'échéance** elle-même.
+  - Toucher la notification (`click`) ouvre la même page en mode modification (ntfy ne permet pas de saisir du texte dans la notification).
 - Liens des actions et de la page d'édition : **jetons signés**, limités à une tâche, avec expiration (pas de Cloudflare Access, pour un accès en un clic).
 
 ### Rendez-vous ↔ Google Agenda
@@ -59,7 +60,7 @@ Périmètre validé avec l'utilisateur lors d'une interview. Priorité : les rap
 ### Découpage
 
 1. **Lot 1** : modèle, admin des types et niveaux, rappels au démarrage. **Prêt pour le dev** (décisions ci-dessous).
-2. **Lot 2** : alertes ntfy (Cron, actions, page d'édition).
+2. **Lot 2** : alertes ntfy (Cron, actions, page d'édition). **Prêt pour le dev.**
 3. **Lot 3** : synchro Google Agenda.
 
 ### Décisions du lot 1 (23/11/2026)
@@ -80,9 +81,17 @@ Tout ce que le serveur renvoie à Claude doit être aussi court que possible :
 - **Descriptions d'outils et `INSTRUCTIONS`** : phrases courtes, sans exemples superflus (elles sont envoyées à chaque conversation).
 - **Annonce par Claude** : les `INSTRUCTIONS` demandent de reprendre les rappels en une ou deux lignes, sans commentaire.
 
-### Questions à trancher pour les lots 2 et 3
+### Décisions du lot 2 (23/11/2026)
 
-- Lot 2 : ntfy.sh public (topic secret) ou instance auto-hébergée, authentification ; précision du Cron (1 ou 5 min) ; fuseau horaire (échéances en Europe/Paris, Cron en UTC, heure d'été) ; « Reporter » modifie l'échéance ou un champ « prochaine alerte » ; répétition d'une alarme ignorée.
+- **ntfy.sh public**, topic secret (longue chaîne aléatoire) stocké en secret Worker, jamais dans le code.
+- **Cron toutes les 15 minutes** (96 exécutions par jour, requête D1 indexée). Les heures d'échéance et les reports se calent sur ce pas.
+- **Fuseau** : échéances et plages stockées en heure de Paris (`Europe/Paris`), conversion depuis l'UTC du Cron avec gestion de l'heure d'été.
+- **Plage d'alerte par niveau de criticité**, réglable dans `/admin` (ex. normale 7 h–minuit, critique 24 h/24). Une alerte qui tombe hors plage part au début de la plage suivante.
+- **Relances par niveau**, réglables dans `/admin` (ex. critique : toutes les heures jusqu'à Vu ou Fait ; normale : une fois ; basse : jamais).
+- Boutons **Fait / Vu / Repousser…** et page mobile au toucher : voir « Alertes (ntfy) ».
+
+### Questions à trancher pour le lot 3
+
 - Lot 3 : mise en place d'OAuth (projet Google Cloud, consentement, refresh token depuis `/admin`) ; criticité, projet et groupe par défaut d'un RDV créé directement dans Google.
 
 ### Points ouverts
