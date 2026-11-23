@@ -61,7 +61,7 @@ Périmètre validé avec l'utilisateur lors d'une interview. Priorité : les rap
 
 1. **Lot 1** : modèle, admin des types et niveaux, rappels au démarrage. **Prêt pour le dev** (décisions ci-dessous).
 2. **Lot 2** : alertes ntfy (Cron, actions, page d'édition). **Prêt pour le dev.**
-3. **Lot 3** : synchro Google Agenda.
+3. **Lot 3** : synchro Google Agenda. **Prêt pour le dev.**
 
 ### Décisions du lot 1 (23/11/2026)
 
@@ -90,13 +90,15 @@ Tout ce que le serveur renvoie à Claude doit être aussi court que possible :
 - **Relances par niveau**, réglables dans `/admin` (ex. critique : toutes les heures jusqu'à Vu ou Fait ; normale : une fois ; basse : jamais).
 - Boutons **Fait / Vu / Repousser…** et page mobile au toucher : voir « Alertes (ntfy) ».
 
-### Questions à trancher pour le lot 3
+### Décisions du lot 3 (23/11/2026)
 
-- Lot 3 : mise en place d'OAuth (projet Google Cloud, consentement, refresh token depuis `/admin`) ; criticité, projet et groupe par défaut d'un RDV créé directement dans Google.
+- **Synchro entrante par le Cron** (toutes les 15 min), avec la synchro incrémentale de Google (`syncToken`) : seuls les changements sont lus. Pas de webhook.
+- **Conflit** : la dernière modification gagne (comparaison des dates de modification des deux côtés).
+- **RDV créé dans Google** : groupe, projet et criticité par défaut réglables dans `/admin` (au départ : groupe Perso, sans projet, criticité normale), modifiables ensuite.
+- **OAuth** : bouton « Connecter Google » dans `/admin`, route de retour sur le Worker qui stocke le jeton de rafraîchissement ; reconnexion en un clic si l'accès est révoqué. Prérequis : projet Google Cloud avec l'app en mode « Production » (en mode « Test », l'autorisation expire au bout de 7 jours). Scope limité à l'agenda.
 
-### Points ouverts
+### Contraintes techniques (tous lots)
 
-- Synchro Google : webhook `watch` (temps réel, canal à renouveler) ou interrogation périodique par le Cron (plus simple, quelques minutes de délai).
-- Conflit si un RDV est modifié des deux côtés : la dernière modification gagne ?
-- Contraintes du plan gratuit : 10 ms de CPU par requête, nombre de Cron Triggers, quotas (`checkQuota()` sur les nouvelles routes).
-- Nouvelles tables à ajouter à `EXPORT_TABLES` (sauvegarde).
+- Plan gratuit : 10 ms de CPU par requête, nombre de Cron Triggers limité (un seul Cron pour les lots 2 et 3), `checkQuota()` sur les nouvelles routes (actions ntfy, page mobile, retour OAuth).
+- Nouvelles tables à ajouter à `EXPORT_TABLES` (sauvegarde), sauf les jetons et l'état de synchro si on préfère ne pas les sauvegarder.
+- Secrets (topic ntfy, client OAuth Google) en secrets Worker uniquement.
