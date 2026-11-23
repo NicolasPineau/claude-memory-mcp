@@ -4,19 +4,10 @@ import { findProject, touchProject } from "../db/memories.js";
 import { b64ToBytes, bytesToB64, guessMime, jsonErr, now, randomToken } from "../util.js";
 
 // ------------------------------------------------------------------ stockage des fichiers
-// Enregistre un fichier (morceaux base64 déjà découpés) dans un groupe, avec projet et souvenir facultatifs.
-export async function storeFile(db, { name, mime, size, chunks, description = "", memoryId = null, projectId = null, groupId }) {
-  if (!groupId) throw new Error("groupe manquant pour le fichier");
-  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
-  const pid = projectId || null;
-  const stmts = [db.prepare("INSERT INTO files(id, filename, mime, size, description, memory_id, project_id, group_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)")
-    .bind(id, name, mime, size, String(description || ""), memoryId || null, pid, groupId, now())];
-  if (!chunks.length) chunks = [""];
-  chunks.forEach((data, k) => stmts.push(db.prepare("INSERT INTO file_chunks(file_id, idx, data) VALUES (?,?,?)").bind(id, k, data)));
-  await db.batch(stmts);
-  await touchProject(db, pid);
-  return { id, name, size };
-}
+// Le contenu des fichiers est dans le bucket R2 lié en FILES (objet f/<id>), sans encodage.
+// Les fichiers d'avant la v4 peuvent encore être dans D1 (morceaux base64 de file_chunks, storage = 'd1') :
+// ils restent lisibles jusqu'à leur migration (scripts/migrate-files-to-r2.mjs).
+export const r2Key = (id) => `f/${id}`;
 
 export function bytesToChunks(bytes) {
   const chunks = [];
@@ -24,7 +15,31 @@ export function bytesToChunks(bytes) {
   return chunks;
 }
 
-export function fileStream(db, fileId) {
+// Enregistre un fichier dans un groupe, avec projet et souvenir facultatifs.
+// Sans bucket lié (déploiement incomplet), il est rangé dans D1 comme avant la v4.
+export async function storeFile(db, bucket, { name, mime, bytes, description = "", memoryId = null, projectId = null, groupId }) {
+  if (!groupId) throw new Error("groupe manquant pour le fichier");
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+  const pid = projectId || null;
+  const storage = bucket ? "r2" : "d1";
+  if (bucket) await bucket.put(r2Key(id), bytes, { httpMetadata: { contentType: mime } });
+  const stmts = [db.prepare("INSERT INTO files(id, filename, mime, size, description, memory_id, project_id, group_id, storage, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+    .bind(id, name, mime, bytes.length, String(description || ""), memoryId || null, pid, groupId, storage, now())];
+  if (!bucket) {
+    const chunks = bytes.length ? bytesToChunks(bytes) : [""];
+    chunks.forEach((data, k) => stmts.push(db.prepare("INSERT INTO file_chunks(file_id, idx, data) VALUES (?,?,?)").bind(id, k, data)));
+  }
+  try {
+    await db.batch(stmts);
+  } catch (e) {
+    if (bucket) await bucket.delete(r2Key(id)); // pas d'objet orphelin dans R2
+    throw e;
+  }
+  await touchProject(db, pid);
+  return { id, name, size: bytes.length };
+}
+
+function d1Stream(db, fileId) {
   let idx = 0;
   return new ReadableStream({
     async pull(ctrl) {
@@ -35,14 +50,40 @@ export function fileStream(db, fileId) {
   });
 }
 
-export function downloadResponse(db, f) {
-  return new Response(fileStream(db, f.id), {
+// Contenu d'un fichier en flux, ou null s'il est introuvable.
+export async function fileStream(db, bucket, f) {
+  if (f.storage !== "r2") return d1Stream(db, f.id);
+  if (!bucket) throw new Error("bucket de fichiers non lié (binding FILES)");
+  const obj = await bucket.get(r2Key(f.id));
+  return obj ? obj.body : null;
+}
+
+// Contenu complet d'un fichier (réservé aux petits fichiers).
+export async function fileBytes(db, bucket, f) {
+  if (f.storage === "r2") {
+    if (!bucket) throw new Error("bucket de fichiers non lié (binding FILES)");
+    const obj = await bucket.get(r2Key(f.id));
+    return obj ? new Uint8Array(await obj.arrayBuffer()) : null;
+  }
+  const chunks = (await db.prepare("SELECT data FROM file_chunks WHERE file_id = ? ORDER BY idx").bind(f.id).all()).results;
+  return b64ToBytes(chunks.map((c) => c.data).join(""));
+}
+
+// Types qui peuvent exécuter du code s'ils sont ouverts dans le navigateur : toujours téléchargés.
+const ACTIVE_TYPES = /html|svg|xml|javascript|ecmascript/i;
+
+export async function downloadResponse(db, bucket, f, { inline = false } = {}) {
+  const body = await fileStream(db, bucket, f);
+  if (!body) return new Response("Not found", { status: 404 });
+  const disposition = inline && !ACTIVE_TYPES.test(f.mime) ? "inline" : "attachment";
+  return new Response(body, {
     headers: {
       "Content-Type": f.mime,
       "Content-Length": String(f.size),
-      "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(f.filename)}`,
+      "Content-Disposition": `${disposition}; filename*=UTF-8''${encodeURIComponent(f.filename)}`,
       "Cache-Control": "no-store",
       "X-Robots-Tag": "noindex",
+      "X-Content-Type-Options": "nosniff",
     },
   });
 }
@@ -56,19 +97,20 @@ export async function createToken(db, type, { fichierId = null, meta = null, ttl
   return { jeton: t, expire_le: new Date(exp).toISOString() };
 }
 
-export async function deleteFile(db, id) {
-  const f = await db.prepare("SELECT id, filename FROM files WHERE id = ?").bind(id).first();
+export async function deleteFile(db, bucket, id) {
+  const f = await db.prepare("SELECT id, filename, size, storage FROM files WHERE id = ?").bind(id).first();
   if (!f) return null;
   await db.batch([
     db.prepare("DELETE FROM file_chunks WHERE file_id = ?").bind(f.id),
     db.prepare("DELETE FROM jetons WHERE fichier_id = ?").bind(f.id),
     db.prepare("DELETE FROM files WHERE id = ?").bind(f.id),
   ]);
+  if (f.storage === "r2" && bucket) await bucket.delete(r2Key(f.id)); // suppression gratuite dans R2
   return f;
 }
 
 // ------------------------------------------------------------------ envoi par lien à usage unique (curl -T)
-export async function handlePutUpload(request, db, jeton) {
+export async function handlePutUpload(request, db, bucket, jeton) {
   const len = parseInt(request.headers.get("Content-Length") || "0");
   if (len > MAX_BYTES) return jsonErr(413, `Fichier trop gros (max ${MAX_FILE_MB} Mo).`);
   const used = await db.prepare("UPDATE jetons SET utilise = 1 WHERE jeton = ? AND type = 'upload' AND utilise = 0 AND expire_le > ?").bind(jeton, Date.now()).run();
@@ -86,6 +128,6 @@ export async function handlePutUpload(request, db, jeton) {
     projectId = p ? p.id : null;
     groupId = p ? p.group_id : await defaultRootGroupId(db);
   }
-  const r = await storeFile(db, { name: meta.nom, mime, size: bytes.length, chunks: bytesToChunks(bytes), description: meta.description, memoryId: meta.souvenir_id, projectId, groupId });
+  const r = await storeFile(db, bucket, { name: meta.nom, mime, bytes, description: meta.description, memoryId: meta.souvenir_id, projectId, groupId });
   return Response.json({ ok: true, id: r.id, nom: r.name, taille: r.size });
 }

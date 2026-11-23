@@ -138,6 +138,6 @@ describe("refus et avertissements", () => {
     const j = await res.json();
     expect(j.configure).toBe(true);
     expect(j.metriques.find((r) => r.metric === "d1_reads_day")).toMatchObject({ value: 2_400_000, limit: 2_500_000, real: 5_000_000 });
-    expect(j.sauvegardes).toBeNull(); // pas de bucket lié dans les tests
+    expect(j.sauvegardes).toEqual([]); // bucket de sauvegardes local, vide
   });
 });

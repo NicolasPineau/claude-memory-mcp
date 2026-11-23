@@ -13,7 +13,7 @@ const V2 = [
   "INSERT INTO files VALUES ('abc123def456', 'plan.pdf', 'application/pdf', 10, '', NULL, 1, '2026-01-01')",
 ];
 
-describe("migration v2 → v3", () => {
+describe("migration v2 → v4", () => {
   it("rattache tout à Perso sans perte, et un second passage ne change rien", async () => {
     for (const q of V2) await env.DB.prepare(q).run();
     resetSchemaCache();
@@ -24,7 +24,7 @@ describe("migration v2 → v3", () => {
       groups: (await env.DB.prepare("SELECT id, name FROM groups").all()).results,
       projects: (await env.DB.prepare("SELECT id, name, group_id FROM projects").all()).results,
       memories: (await env.DB.prepare("SELECT id, title, project_id, group_id FROM memories ORDER BY id").all()).results,
-      files: (await env.DB.prepare("SELECT id, group_id FROM files").all()).results,
+      files: (await env.DB.prepare("SELECT id, group_id, storage FROM files").all()).results,
       version: (await env.DB.prepare("SELECT value FROM schema_meta WHERE key = 'version'").first()).value,
     });
     const first = await snapshot();
@@ -35,8 +35,8 @@ describe("migration v2 → v3", () => {
         { id: 1, title: "Peinture", project_id: 1, group_id: perso.id },
         { id: 2, title: "Idée", project_id: null, group_id: perso.id },
       ],
-      files: [{ id: "abc123def456", group_id: perso.id }],
-      version: "3",
+      files: [{ id: "abc123def456", group_id: perso.id, storage: "d1" }], // contenu encore dans D1, à migrer vers R2
+      version: "4",
     });
 
     resetSchemaCache();

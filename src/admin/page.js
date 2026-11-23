@@ -44,7 +44,7 @@ a{color:var(--acc)}mark{background:#f6d365;color:#1d1d1b;border-radius:3px;paddi
 .empty{color:var(--mut);font-style:italic}progress{width:100%;margin-top:8px;display:none}
 details summary{cursor:pointer;color:var(--acc);font-weight:600;margin:4px 0}
 </style></head><body>
-<header><h1 id="home">🧠 Mémoire</h1><form id="sf"><input id="sq" type="search" placeholder="Rechercher dans tous les projets…"><button class="p">Chercher</button></form><button id="ngroupes">Groupes</button><button id="ncles">Clés</button><small>${escHtml(email)}</small></header>
+<header><h1 id="home">🧠 Mémoire</h1><form id="sf"><input id="sq" type="search" placeholder="Rechercher dans tous les projets…"><button class="p">Chercher</button></form><button id="nfichiers">Fichiers</button><button id="ngroupes">Groupes</button><button id="ncles">Clés</button><small>${escHtml(email)}</small></header>
 <div id="banner" style="display:none;padding:10px 16px;font-weight:600"></div>
 <div class="wrap"><aside><button class="p" id="newp" style="width:100%">+ Nouveau projet</button><div id="plist"></div></aside><main id="main"></main></div>
 <div id="toast"></div>
@@ -83,7 +83,7 @@ function memItem(s){return '<div class="item" data-mid="'+s.id+'"><div class="t"
 (s.tags.length?"<div>"+s.tags.map((t)=>'<span class="tag" data-tag="'+esc(t)+'">'+esc(t)+"</span>").join("")+"</div>":"")+
 "<pre>"+esc(s.content)+'</pre><div class="acts"><button data-a="edit">Modifier</button><button data-a="del" class="d">Supprimer</button></div></div>'}
 
-function fileItem(f){return '<div class="item" data-fid="'+esc(f.id)+'"><div class="row"><div><a href="/admin/fichiers/'+encodeURIComponent(f.id)+'">'+esc(f.filename)+'</a> <span class="meta">'+fmt(f.size)+" · "+day(f.created_at)+(f.memory_id?" · souvenir #"+f.memory_id:"")+" · id "+esc(f.id)+"</span>"+
+function fileItem(f){return '<div class="item" data-fid="'+esc(f.id)+'"><div class="row"><div><a href="/admin/fichiers/'+encodeURIComponent(f.id)+'?voir" target="_blank" rel="noopener">'+esc(f.filename)+'</a> <a href="/admin/fichiers/'+encodeURIComponent(f.id)+'" title="Télécharger">⬇</a> <span class="meta">'+fmt(f.size)+" · "+day(f.created_at)+(f.memory_id?" · souvenir #"+f.memory_id:"")+" · id "+esc(f.id)+"</span>"+
 (f.description?'<div class="meta">'+esc(f.description)+"</div>":"")+'</div></div><div class="acts"><button data-a="fedit">Modifier</button><button data-a="fdel" class="d">Supprimer</button></div></div>'}
 
 const openProjet=(pid)=>openView("p:"+pid,"projets/"+pid);
@@ -134,6 +134,38 @@ h+="<h3>Souvenirs ("+j.souvenirs.length+")</h3>"+(j.souvenirs.map((s)=>'<div cla
 (s.tags.length?"<div>"+s.tags.map((t)=>'<span class="tag" data-tag="'+esc(t)+'">'+esc(t)+"</span>").join("")+"</div>":"")+"<pre>"+hl(s.extrait)+"</pre></div>").join("")||'<p class="empty">Aucun souvenir.</p>');
 if(j.fichiers.length)h+="<h3>Fichiers ("+j.fichiers.length+")</h3>"+j.fichiers.map((f)=>'<div class="item"><a href="/admin/fichiers/'+encodeURIComponent(f.id)+'">'+esc(f.filename)+'</a> <span class="meta">'+fmt(f.size)+" · "+esc(gpath(f.group_id))+" · "+(f.project_id?'<a href="#" data-p="'+f.project_id+'">'+esc(f.projet)+"</a>":'<a href="#" data-o="'+f.group_id+'">sans projet</a>')+"</span>"+(f.description?'<div class="meta">'+esc(f.description)+"</div>":"")+"</div>").join("");
 $("#main").innerHTML=h+"</section>";$$("#main [data-p]").forEach((a)=>a.onclick=(e)=>{e.preventDefault();openProjet(Number(a.dataset.p))});$$("#main [data-o]").forEach((a)=>a.onclick=(e)=>{e.preventDefault();openOrphans(Number(a.dataset.o))});$$("#main .tag[data-tag]").forEach((t)=>t.onclick=()=>search("",t.dataset.tag))}
+
+// --- ménage des fichiers
+const KINDS={image:"Images",pdf:"PDF",doc:"Documents bureautiques",texte:"Texte et code",media:"Audio et vidéo",autre:"Autres"};
+function kind(f){const m=f.mime||"",n=(f.filename||"").toLowerCase();if(m.startsWith("image/"))return"image";if(m==="application/pdf")return"pdf";
+if(/word|excel|powerpoint|opendocument|officedocument|msword|rtf/.test(m)||/\.(docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/.test(n))return"doc";
+if(m.startsWith("text/")||/json|xml|javascript/.test(m))return"texte";if(m.startsWith("audio/")||m.startsWith("video/"))return"media";return"autre"}
+let fstate={tri:"taille",ordre:"desc",q:"",groupe:"",projet:"",type:"",sel:new Set()};
+async function fichiersPage(){state.cur=null;renderList();const j=await api("GET","fichiers");const all=j.fichiers;fstate.sel=new Set([...fstate.sel].filter((id)=>all.some((f)=>f.id===id)));
+const sub=(gid)=>{const out=new Set([gid]);let grew=true;while(grew){grew=false;for(const g of state.groupes)if(out.has(g.parent_id)&&!out.has(g.id)){out.add(g.id);grew=true}}return out};
+const total=all.reduce((n,f)=>n+f.size,0),inD1=all.filter((f)=>f.storage!=="r2");
+$("#main").innerHTML='<section class="card"><h2>Fichiers</h2><p class="meta">'+all.length+" fichier(s), "+fmt(total)+" au total"+(inD1.length?" · <b>"+inD1.length+" encore dans D1</b> ("+fmt(inD1.reduce((n,f)=>n+f.size,0))+") : lance le workflow « Migrer les fichiers vers R2 »":" · tous dans R2")+"</p>"+
+'<div class="row"><div><label>Recherche (nom, description)</label><input id="fq" type="search" value="'+esc(fstate.q)+'"></div><div><label>Groupe</label><select id="fg">'+groupOpts(fstate.groupe?Number(fstate.groupe):null,"Tous les groupes")+'</select></div></div>'+
+'<div class="row"><div><label>Projet</label><select id="fp"><option value="">Tous les projets</option><option value="0"'+(fstate.projet==="0"?" selected":"")+'>— sans projet —</option>'+state.projets.map((p)=>'<option value="'+p.id+'"'+(String(p.id)===fstate.projet?" selected":"")+">"+esc(p.name)+"</option>").join("")+'</select></div><div><label>Type</label><select id="ft"><option value="">Tous les types</option>'+Object.entries(KINDS).map(([k,v])=>'<option value="'+k+'"'+(fstate.type===k?" selected":"")+">"+v+"</option>").join("")+'</select></div><div><label>Tri</label><select id="fs">'+[["taille","Taille"],["date","Date"],["nom","Nom"]].map(([k,v])=>'<option value="'+k+'"'+(fstate.tri===k?" selected":"")+">"+v+"</option>").join("")+'</select></div><div><label>Ordre</label><select id="fo"><option value="desc"'+(fstate.ordre==="desc"?" selected":"")+'>Décroissant</option><option value="asc"'+(fstate.ordre==="asc"?" selected":"")+">Croissant</option></select></div></div>"+
+'<div class="acts" style="margin-top:12px;align-items:center"><button id="fdelsel" class="d">Supprimer la sélection</button><span class="meta" id="fsum"></span></div></section><section class="card" id="flist"></section>';
+const render=()=>{const q=fstate.q.trim().toLowerCase(),gs=fstate.groupe?sub(Number(fstate.groupe)):null;
+let list=all.filter((f)=>(!q||(f.filename+" "+(f.description||"")).toLowerCase().includes(q))&&(!gs||gs.has(f.group_id))&&(fstate.projet===""||(fstate.projet==="0"?!f.project_id:String(f.project_id)===fstate.projet))&&(!fstate.type||kind(f)===fstate.type));
+const cmp={taille:(a,b)=>a.size-b.size,date:(a,b)=>a.created_at.localeCompare(b.created_at),nom:(a,b)=>a.filename.localeCompare(b.filename,"fr")}[fstate.tri];
+list.sort((a,b)=>fstate.ordre==="asc"?cmp(a,b):cmp(b,a));
+const shown=list.reduce((n,f)=>n+f.size,0),selected=all.filter((f)=>fstate.sel.has(f.id));
+$("#fsum").textContent=list.length+" affiché(s) ("+fmt(shown)+") · "+selected.length+" sélectionné(s) ("+fmt(selected.reduce((n,f)=>n+f.size,0))+")";
+$("#fdelsel").disabled=!selected.length;
+$("#flist").innerHTML=list.length?'<table style="width:100%;border-collapse:collapse"><tr><th><input type="checkbox" id="fall" title="Tout sélectionner"'+(list.every((f)=>fstate.sel.has(f.id))?" checked":"")+'></th><th align="left">Nom</th><th align="right">Taille</th><th align="left">Type</th><th align="left">Rangement</th><th align="left">Ajouté</th><th></th></tr>'+
+list.map((f)=>'<tr data-fid="'+esc(f.id)+'" style="border-top:1px solid var(--bd)"><td><input type="checkbox" data-sel'+(fstate.sel.has(f.id)?" checked":"")+'></td><td style="padding:6px 4px"><a href="/admin/fichiers/'+encodeURIComponent(f.id)+'?voir" target="_blank" rel="noopener">'+esc(f.filename)+"</a>"+(f.description?'<div class="meta">'+esc(f.description.slice(0,120))+(f.description.length>120?"…":"")+"</div>":"")+'</td><td align="right" style="white-space:nowrap"><b>'+fmt(f.size)+'</b></td><td class="meta">'+KINDS[kind(f)]+(f.storage!=="r2"?" · D1":"")+'</td><td class="meta">'+esc(gpath(f.group_id))+(f.projet?" › "+esc(f.projet):"")+(f.memory_id?" · souvenir #"+f.memory_id:"")+'</td><td class="meta" style="white-space:nowrap">'+day(f.created_at)+'</td><td style="white-space:nowrap"><a href="/admin/fichiers/'+encodeURIComponent(f.id)+'" title="Télécharger">⬇</a> <button data-a="del" class="d" style="padding:2px 8px">Supprimer</button></td></tr>').join("")+"</table>":'<p class="empty">Aucun fichier ne correspond.</p>';
+$$("#flist [data-sel]").forEach((c)=>c.onchange=()=>{const id=c.closest("tr").dataset.fid;c.checked?fstate.sel.add(id):fstate.sel.delete(id);render()});
+$("#fall")&&($("#fall").onchange=(e)=>{list.forEach((f)=>e.target.checked?fstate.sel.add(f.id):fstate.sel.delete(f.id));render()});
+$$('#flist [data-a="del"]').forEach((b)=>b.onclick=async()=>{const f=all.find((x)=>x.id===b.closest("tr").dataset.fid);if(!confirm("Supprimer définitivement « "+f.filename+" » ("+fmt(f.size)+") ?"))return;await api("DELETE","fichiers/"+encodeURIComponent(f.id));fstate.sel.delete(f.id);toast("Fichier supprimé ("+fmt(f.size)+" libérés)");await loadProjets();fichiersPage()})};
+$("#fq").oninput=(e)=>{fstate.q=e.target.value;render()};
+$("#fg").onchange=(e)=>{fstate.groupe=e.target.value;render()};$("#fp").onchange=(e)=>{fstate.projet=e.target.value;render()};$("#ft").onchange=(e)=>{fstate.type=e.target.value;render()};
+$("#fs").onchange=(e)=>{fstate.tri=e.target.value;render()};$("#fo").onchange=(e)=>{fstate.ordre=e.target.value;render()};
+$("#fdelsel").onclick=async()=>{const ids=[...fstate.sel],size=all.filter((f)=>fstate.sel.has(f.id)).reduce((n,f)=>n+f.size,0);if(!ids.length)return;
+if(!confirm("Supprimer définitivement "+ids.length+" fichier(s) ("+fmt(size)+") ?\\nIrréversible."))return;const r=await api("POST","fichiers/supprimer",{ids});fstate.sel.clear();toast(r.supprimes+" fichier(s) supprimé(s), "+fmt(r.octets)+" libérés");await loadProjets();fichiersPage()};
+render()}
 
 // --- groupes
 function groupesPage(){state.cur=null;renderList();const G=state.groupes;
@@ -189,7 +221,7 @@ $("#main").innerHTML='<section class="card"><h2>Bienvenue</h2><p>Choisis un proj
 $$("#main .tag").forEach((x)=>x.onclick=()=>search("",x.dataset.tag))}
 
 $("#sf").onsubmit=(e)=>{e.preventDefault();const q=$("#sq").value.trim();if(q)search(q)};
-$("#home").onclick=home;$("#ngroupes").onclick=groupesPage;$("#ncles").onclick=()=>clesPage();
+$("#home").onclick=home;$("#nfichiers").onclick=()=>fichiersPage();$("#ngroupes").onclick=groupesPage;$("#ncles").onclick=()=>clesPage();
 $("#newp").onclick=()=>{state.cur=null;renderList();$("#main").innerHTML='<section class="card"><h2>Nouveau projet</h2><form id="np"><label>Nom</label><input name="nom" required><div class="row"><div><label>Groupe</label><select name="groupe_id" required>'+groupOpts(null,"— choisir —")+'</select></div><div><label>Statut</label><select name="statut">'+opts(STATUTS,"actif")+'</select></div></div><label>Description</label><textarea name="description" class="big"></textarea><div class="acts"><button class="p">Créer</button></div></form></section>';
 $("#np").onsubmit=async(e)=>{e.preventDefault();const f=e.target;const r=await api("POST","projets",{nom:f.nom.value,groupe_id:Number(f.groupe_id.value),statut:f.statut.value,description:f.description.value});toast("Projet créé");await loadProjets();openProjet(r.id)}};
 loadProjets().then(home).catch(()=>{});

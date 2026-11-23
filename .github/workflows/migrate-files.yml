@@ -1,0 +1,40 @@
+name: Migrer les fichiers vers R2
+
+# À lancer à la main, une fois, après le déploiement de la v4 : copie le contenu des fichiers joints
+# de D1 vers le bucket R2 des fichiers, puis le retire de D1. Idempotent : peut être relancé.
+on:
+  workflow_dispatch:
+    inputs:
+      essai:
+        description: "Essai à blanc (compte les fichiers et vérifie les seuils, sans rien modifier)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migration-fichiers
+  cancel-in-progress: false
+
+jobs:
+  migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Copier les fichiers de D1 vers R2
+        run: node scripts/migrate-files-to-r2.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BACKUP_DATABASE: ${{ vars.BACKUP_DATABASE }}
+          FILES_BUCKET: ${{ vars.FILES_BUCKET }}
+          MIGRATE_DRY_RUN: ${{ inputs.essai && '1' || '' }}
+          QUOTA_R2_STORAGE_GB: ${{ vars.QUOTA_R2_STORAGE_GB }}
+          QUOTA_R2_CLASS_A_MONTH: ${{ vars.QUOTA_R2_CLASS_A_MONTH }}
