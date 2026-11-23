@@ -7,7 +7,17 @@ compatibility_date = "2026-11-15"
 # Les secrets (MEMORY_SECRET) ne sont jamais touchés par un déploiement.
 keep_vars = true
 
+# Adresse publique memory.<sous-domaine>.workers.dev, sans URL de preview par version.
+workers_dev = true
+preview_urls = false
+
 [[d1_databases]]
 binding = "DB"                       # doit rester exactement "DB"
 database_name = "memoire"
 database_id = "9e1381a5-90c1-4bce-8ca8-d74af8c3c910"
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
