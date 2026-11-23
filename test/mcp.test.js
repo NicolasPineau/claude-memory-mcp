@@ -29,11 +29,11 @@ describe("protocole MCP", () => {
     expect(r.result.instructions).toContain("list_projects");
   });
 
-  it("expose les 15 outils dans l'ordre", async () => {
+  it("expose les 18 outils dans l'ordre", async () => {
     const r = await rpc("tools/list");
     expect(r.result.tools.map((t) => t.name)).toEqual([
       "recall", "remember", "read_memory", "update_memory", "forget",
-      "list_projects", "set_project", "project_context", "list_tags", "list_groups",
+      "list_projects", "set_project", "project_context", "list_tags", "add_task", "update_task", "list_tasks", "list_groups",
       "attach_file", "prepare_upload", "read_file", "delete_file", "list_files",
     ]);
   });

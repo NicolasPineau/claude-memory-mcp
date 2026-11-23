@@ -3,6 +3,7 @@ import { generateKey, masterKeyEnabled, sha256hex } from "../auth/keys.js";
 import { ACCESS, MAX_DEPTH, effectiveRights, loadGroups } from "../db/groups.js";
 import { deleteMemory, ftsQuery, moveProject, reindex, reindexProject, setTags, syncMemoryFiles, touchProject } from "../db/memories.js";
 import { deleteFile, storeFile } from "../files/storage.js";
+import { ALERTS, DEFAULT_SETTINGS, getSetting } from "../db/tasks.js";
 import { cleanName, guessMime, jsonOk, normTags, now } from "../util.js";
 
 export const likeArg = (q) => `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
@@ -60,6 +61,54 @@ const ruleStmts = (db, keyId, rules) => [
   db.prepare("DELETE FROM api_key_rules WHERE key_id = ?").bind(keyId),
   ...[...rules].map(([gid, acc]) => db.prepare("INSERT INTO api_key_rules(key_id, group_id, access) VALUES (?,?,?)").bind(keyId, gid, acc)),
 ];
+
+// ------------------------------------------------------------------ types de tâche et niveaux de criticité
+const HHMM = /^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/;
+const TASK_TABLES = {
+  "types-taches": { table: "task_types", fk: "type_id", label: "type" },
+  niveaux: { table: "task_levels", fk: "level_id", label: "niveau" },
+};
+
+const intIn = (v, min, max, what) => {
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < min || n > max) throw new ApiError(400, `${what} : entier entre ${min} et ${max}.`);
+  return n;
+};
+
+// Champs d'un type ou d'un niveau, validés ; `cur` = valeurs actuelles (modification).
+function taskConfFields(res, b, cur = {}) {
+  const nom = b.nom != null ? String(b.nom).trim() : cur.name;
+  if (!nom) throw new ApiError(400, "Le nom est obligatoire.");
+  const f = { name: nom, position: b.position != null ? intIn(b.position, 0, 999, "Ordre") : cur.position ?? 0, is_default: b.par_defaut != null ? (b.par_defaut ? 1 : 0) : cur.is_default ?? 0 };
+  if (res === "types-taches") {
+    f.sync = b.synchro != null ? String(b.synchro) : cur.sync ?? "";
+    if (!["", "google"].includes(f.sync)) throw new ApiError(400, "Synchro invalide (aucune ou google).");
+    return f;
+  }
+  f.marker = b.marqueur != null ? String(b.marqueur).trim().slice(0, 4) : cur.marker ?? "";
+  f.horizon_days = b.horizon_jours != null ? intIn(b.horizon_jours, 0, 365, "Horizon") : cur.horizon_days ?? 0;
+  f.alert = b.alerte != null ? String(b.alerte) : cur.alert ?? "aucune";
+  if (!ALERTS.includes(f.alert)) throw new ApiError(400, `Alerte invalide (${ALERTS.join(", ")}).`);
+  f.alert_from = b.plage_debut != null ? String(b.plage_debut) : cur.alert_from ?? "07:00";
+  f.alert_to = b.plage_fin != null ? String(b.plage_fin) : cur.alert_to ?? "24:00";
+  if (!HHMM.test(f.alert_from) || !HHMM.test(f.alert_to)) throw new ApiError(400, "Plage d'alerte invalide (HH:MM).");
+  f.repeat_minutes = b.relance_minutes != null ? intIn(b.relance_minutes, 0, 10080, "Relance") : cur.repeat_minutes ?? 0;
+  return f;
+}
+
+async function saveTaskConf(db, res, id, f) {
+  const { table } = TASK_TABLES[res], ts = now(), cols = Object.keys(f);
+  const stmts = f.is_default ? [db.prepare(`UPDATE ${table} SET is_default = 0`)] : [];
+  try {
+    if (id) stmts.push(db.prepare(`UPDATE ${table} SET ${cols.map((c) => c + " = ?").join(", ")}, updated_at = ? WHERE id = ?`).bind(...Object.values(f), ts, id));
+    else stmts.push(db.prepare(`INSERT INTO ${table}(${cols.join(", ")}, created_at, updated_at) VALUES (${cols.map(() => "?").join(", ")}, ?, ?)`).bind(...Object.values(f), ts, ts));
+    const r = await db.batch(stmts);
+    return r[r.length - 1].meta.last_row_id;
+  } catch (e) {
+    if (/UNIQUE/i.test(e.message)) throw new ApiError(409, `« ${f.name} » existe déjà.`);
+    throw e;
+  }
+}
 
 export class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -161,7 +210,7 @@ export async function adminApi(request, db, path, url, env = {}, quota = null) {
 
   // --- clés d'accès (une par compte Claude)
   if (res === "cles" && !id && m === "GET") {
-    const keys = (await db.prepare("SELECT id, name, default_group_id, created_at, last_used_at, revoked_at FROM api_keys ORDER BY revoked_at IS NOT NULL, created_at").all()).results;
+    const keys = (await db.prepare("SELECT id, name, default_group_id, show_reminders, created_at, last_used_at, revoked_at FROM api_keys ORDER BY revoked_at IS NOT NULL, created_at").all()).results;
     const rules = (await db.prepare("SELECT key_id, group_id, access FROM api_key_rules").all()).results;
     for (const k of keys) k.regles = Object.fromEntries(rules.filter((r) => r.key_id === k.id).map((r) => [r.group_id, r.access]));
     return jsonOk({ cles: keys, cle_maitresse_active: masterKeyEnabled(env) });
@@ -174,7 +223,7 @@ export async function adminApi(request, db, path, url, env = {}, quota = null) {
     const rules = await rulesFrom(db, b.regles);
     await checkDefaultGroup(db, def, rules);
     const key = generateKey();
-    const r = await db.prepare("INSERT INTO api_keys(name, key_hash, default_group_id, created_at) VALUES (?,?,?,?)").bind(nom, await sha256hex(key), def, now()).run();
+    const r = await db.prepare("INSERT INTO api_keys(name, key_hash, default_group_id, show_reminders, created_at) VALUES (?,?,?,?,?)").bind(nom, await sha256hex(key), def, b.rappels === false ? 0 : 1, now()).run();
     const kid = r.meta.last_row_id;
     await db.batch(ruleStmts(db, kid, rules));
     return jsonOk({ ok: true, id: kid, cle: key, url: `${url.origin}/${key}/mcp` });
@@ -190,12 +239,59 @@ export async function adminApi(request, db, path, url, env = {}, quota = null) {
     const rules = b.regles != null ? await rulesFrom(db, b.regles)
       : new Map((await db.prepare("SELECT group_id, access FROM api_key_rules WHERE key_id = ?").bind(k.id).all()).results.map((r) => [r.group_id, r.access]));
     await checkDefaultGroup(db, def, rules);
-    await db.batch([db.prepare("UPDATE api_keys SET name = ?, default_group_id = ? WHERE id = ?").bind(nom, def, k.id), ...ruleStmts(db, k.id, rules)]);
+    const rappels = b.rappels != null ? (b.rappels ? 1 : 0) : k.show_reminders;
+    await db.batch([db.prepare("UPDATE api_keys SET name = ?, default_group_id = ?, show_reminders = ? WHERE id = ?").bind(nom, def, rappels, k.id), ...ruleStmts(db, k.id, rules)]);
     return jsonOk({ ok: true });
   }
   if (res === "cles" && id && m === "DELETE") {
     const r = await db.prepare("UPDATE api_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(now(), Number(id)).run();
     if (!r.meta.changes) throw new ApiError(404, "Clé introuvable ou déjà révoquée.");
+    return jsonOk({ ok: true });
+  }
+
+  // --- tâches : types, niveaux de criticité, réglages
+  if (res === "taches-config" && !id && m === "GET") {
+    const count = async (fk) => new Map((await db.prepare(`SELECT ${fk} AS id, COUNT(*) n FROM tasks GROUP BY ${fk}`).all()).results.map((r) => [r.id, r.n]));
+    const [nt, nl] = [await count("type_id"), await count("level_id")];
+    const types = (await db.prepare("SELECT * FROM task_types ORDER BY position, id").all()).results.map((t) => ({ ...t, n_taches: nt.get(t.id) || 0 }));
+    const niveaux = (await db.prepare("SELECT * FROM task_levels ORDER BY position, id").all()).results.map((l) => ({ ...l, n_taches: nl.get(l.id) || 0 }));
+    const reglages = {};
+    for (const k of Object.keys(DEFAULT_SETTINGS)) reglages[k] = await getSetting(db, k);
+    return jsonOk({ types, niveaux, reglages, alertes: ALERTS });
+  }
+  if (TASK_TABLES[res] && !id && m === "POST") {
+    return jsonOk({ ok: true, id: await saveTaskConf(db, res, null, taskConfFields(res, await readJson(request))) });
+  }
+  if (TASK_TABLES[res] && id && m === "PATCH") {
+    const cur = await db.prepare(`SELECT * FROM ${TASK_TABLES[res].table} WHERE id = ?`).bind(Number(id)).first();
+    if (!cur) throw new ApiError(404, "Introuvable.");
+    const f = taskConfFields(res, await readJson(request), cur);
+    if (cur.is_default && !f.is_default) throw new ApiError(400, "Il faut toujours un élément par défaut : coche « par défaut » sur un autre.");
+    await saveTaskConf(db, res, cur.id, f);
+    return jsonOk({ ok: true });
+  }
+  // Suppression : les tâches existantes basculent vers `?vers=<id>` (obligatoire s'il y en a, et si l'élément est celui par défaut).
+  if (TASK_TABLES[res] && id && m === "DELETE") {
+    const { table, fk, label } = TASK_TABLES[res];
+    const cur = await db.prepare(`SELECT * FROM ${table} WHERE id = ?`).bind(Number(id)).first();
+    if (!cur) throw new ApiError(404, "Introuvable.");
+    const n = (await db.prepare(`SELECT COUNT(*) n FROM tasks WHERE ${fk} = ?`).bind(cur.id).first()).n;
+    const vers = Number(url.searchParams.get("vers")) || null;
+    if ((n || cur.is_default) && !vers) throw new ApiError(400, `Choisis le ${label} vers lequel basculer ${n ? `les ${n} tâche(s)` : "le réglage par défaut"}.`);
+    if (vers === cur.id) throw new ApiError(400, `Le ${label} de bascule doit être différent.`);
+    if (vers && !(await db.prepare(`SELECT 1 FROM ${table} WHERE id = ?`).bind(vers).first())) throw new ApiError(404, `${label} de bascule introuvable.`);
+    const stmts = [];
+    if (vers) stmts.push(db.prepare(`UPDATE tasks SET ${fk} = ?, updated_at = ? WHERE ${fk} = ?`).bind(vers, now(), cur.id));
+    if (cur.is_default) stmts.push(db.prepare(`UPDATE ${table} SET is_default = 1 WHERE id = ?`).bind(vers));
+    stmts.push(db.prepare(`DELETE FROM ${table} WHERE id = ?`).bind(cur.id));
+    await db.batch(stmts);
+    return jsonOk({ ok: true, basculees: n });
+  }
+  if (res === "reglages" && !id && m === "PATCH") {
+    const b = await readJson(request);
+    const stmts = [];
+    if (b.rappels_max != null) stmts.push(db.prepare("INSERT INTO settings(key, value) VALUES ('rappels_max', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(String(intIn(b.rappels_max, 1, 50, "Rappels au démarrage"))));
+    if (stmts.length) await db.batch(stmts);
     return jsonOk({ ok: true });
   }
 

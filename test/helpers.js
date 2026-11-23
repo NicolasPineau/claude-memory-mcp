@@ -25,7 +25,7 @@ export async function call(key, name, args = {}) {
 export async function schema() {
   resetSchemaCache();
   await ensureSchema(env.DB);
-  for (const t of ["file_chunks", "jetons", "memory_tags", "memories_fts", "files", "memories", "projects", "tags", "api_key_rules", "api_keys", "schema_meta", "usage_cache"])
+  for (const t of ["tasks", "task_types", "task_levels", "settings", "file_chunks", "jetons", "memory_tags", "memories_fts", "files", "memories", "projects", "tags", "api_key_rules", "api_keys", "schema_meta", "usage_cache"])
     await env.DB.prepare(`DELETE FROM ${t}`).run();
   // Groupes : des feuilles vers la racine, à cause de la clé étrangère parent_id.
   while ((await env.DB.prepare("DELETE FROM groups WHERE id NOT IN (SELECT parent_id FROM groups WHERE parent_id IS NOT NULL)").run()).meta.changes);

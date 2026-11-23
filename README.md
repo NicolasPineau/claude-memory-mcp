@@ -13,6 +13,7 @@ Tool names are in English; tool descriptions, parameters and server instructions
 - **Groups**: every project belongs to a group, in a tree up to 3 levels deep (e.g. `Perso › Scoutisme`, `Pro`). Projects can move between groups with their memories and files.
 - **Access keys**: one connector URL per Claude account, each with read-write, read-only or no access per group, inherited by sub-groups (e.g. your work account only sees `Pro`).
 - **Tags**: free-form thematic tags.
+- **Tasks and reminders**: memories with a due date (Paris time), a criticality level, a status (`a_faire`, `silencieux`, `fait`, `annule`) and an optional recurrence. At the start of every conversation, `list_projects` also returns the due, overdue and upcoming tasks (each level sets how many days ahead they show up), in a compact one-line format. Task types and criticality levels are managed in `/admin`; each key can opt out of reminders.
 - **Files**: attach files up to 20 MB, stored in a private R2 bucket (the database only keeps their metadata). Small text files can go through the tools directly; larger ones use short-lived upload links (10 min) and download links (1 h). A cleanup page in `/admin` lists them by size, with search, filters, preview and bulk delete.
 - **Built-in instructions** that tell Claude how to use the memory: list project names once at the start, load a project only when relevant, save nothing mid-conversation, offer a summary at the end, and never store secrets.
 - **Admin web UI** at `/admin` to browse, edit and upload, protected by Cloudflare Access.
@@ -32,6 +33,9 @@ Tool names are in English; tool descriptions, parameters and server instructions
 | `set_project` | Create or update a project |
 | `project_context` | Load a project's context |
 | `list_tags` | List tags |
+| `add_task` | Create a task (due date, criticality, type, recurrence) |
+| `update_task` | Update a task: status, due date, criticality… (done on a recurring task creates the next one) |
+| `list_tasks` | List tasks, one line each |
 | `list_groups` | List the groups this connector can see, with its rights |
 | `attach_file` | Attach a small text file |
 | `prepare_upload` | Get a one-time upload link for a larger or binary file |

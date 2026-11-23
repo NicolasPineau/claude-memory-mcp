@@ -12,11 +12,12 @@ Serveur MCP « mémoire partagée » pour Claude : Cloudflare Worker (JavaScript
 | `src/db/schema.js` | Schéma SQL et migrations, appliqués à la première requête (`ensureSchema`) |
 | `src/db/groups.js` | Arbre des groupes, droits effectifs (héritage), `Acl` (filtres SQL, résolution d'un groupe par chemin ou nom) |
 | `src/db/memories.js` | Accès aux souvenirs, projets, tags et à l'index FTS5 |
+| `src/db/tasks.js` | Tâches : dates en heure de Paris, échéances et récurrences, ligne compacte, rappels du début de conversation, réglages (`settings`) |
 | `src/files/storage.js` | Contenu des fichiers dans R2 (`FILES`, objets `f/<id>`) ; lecture des anciens fichiers restés dans D1 (`storage = 'd1'`) ; jetons de téléchargement et d'envoi |
 | `src/mcp/protocol.js` | JSON-RPC MCP (Streamable HTTP sans état) : `initialize`, `tools/list`, `tools/call` |
 | `src/mcp/tool-helpers.js` | Annotations (`RO`, `WR`, `DE`) et aides pour les schémas d'entrée |
 | `src/mcp/placement.js` | Où ranger un souvenir ou un fichier (projet, groupe, création de projet) selon les droits |
-| `src/mcp/tools/*.js` | Outils MCP par domaine : `memories`, `projects`, `groups`, `files` ; `index.js` fixe l'ordre d'exposition |
+| `src/mcp/tools/*.js` | Outils MCP par domaine : `memories`, `projects`, `tasks`, `groups`, `files` ; `index.js` fixe l'ordre d'exposition |
 | `src/auth/access.js` | Vérification du JWT Cloudflare Access pour `/admin` |
 | `src/auth/keys.js` | Clés d'accès (hash SHA-256), clé maîtresse, construction de l'`Acl` d'une requête |
 | `src/quota/limits.js` | Limites gratuites Cloudflare, seuils par défaut (50 %) et variables `QUOTA_*` |
@@ -39,6 +40,7 @@ Serveur MCP « mémoire partagée » pour Claude : Cloudflare Worker (JavaScript
 - Un changement de schéma passe par `migrate()` dans `src/db/schema.js` (idempotent) et par `SCHEMA_VERSION`. Une nouvelle table à sauvegarder s'ajoute à `EXPORT_TABLES` dans `scripts/backup.mjs`.
 - Toute nouvelle route qui consomme D1 ou R2 passe par `checkQuota()` et refuse l'appel quand un seuil est atteint.
 - Le Worker ne fait aucun traitement lourd (10 ms de CPU par requête en gratuit) : pas de décodage ni de compression de gros volumes. Le contenu des fichiers circule en flux (`ReadableStream`) ; les traitements lourds passent par un workflow GitHub.
+- Économie de tokens : tout ce que les outils renvoient à Claude reste aussi court que possible (réponses `ok #id`, une ligne par tâche, sections vides omises).
 - Les tests fixent la consommation avec `usage()` (`test/helpers.js`) : ils ne doivent jamais appeler l'API Analytics réelle.
 
 ## Commandes

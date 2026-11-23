@@ -44,7 +44,7 @@ a{color:var(--acc)}mark{background:#f6d365;color:#1d1d1b;border-radius:3px;paddi
 .empty{color:var(--mut);font-style:italic}progress{width:100%;margin-top:8px;display:none}
 details summary{cursor:pointer;color:var(--acc);font-weight:600;margin:4px 0}
 </style></head><body>
-<header><h1 id="home">🧠 Mémoire</h1><form id="sf"><input id="sq" type="search" placeholder="Rechercher dans tous les projets…"><button class="p">Chercher</button></form><button id="nfichiers">Fichiers</button><button id="ngroupes">Groupes</button><button id="ncles">Clés</button><small>${escHtml(email)}</small></header>
+<header><h1 id="home">🧠 Mémoire</h1><form id="sf"><input id="sq" type="search" placeholder="Rechercher dans tous les projets…"><button class="p">Chercher</button></form><button id="nfichiers">Fichiers</button><button id="ngroupes">Groupes</button><button id="ntaches">Tâches</button><button id="ncles">Clés</button><small>${escHtml(email)}</small></header>
 <div id="banner" style="display:none;padding:10px 16px;font-weight:600"></div>
 <div class="wrap"><aside><button class="p" id="newp" style="width:100%">+ Nouveau projet</button><div id="plist"></div></aside><main id="main"></main></div>
 <div id="toast"></div>
@@ -188,20 +188,47 @@ function rulesEditor(rules){return '<table style="width:100%;border-collapse:col
 state.groupes.map((g)=>'<tr><td style="padding:4px 0 4px '+(g.niveau-1)*16+'px">'+esc(g.nom)+'</td><td><select data-rule="'+g.id+'"><option value="">'+(g.parent_id?"hérité":"— (aucun accès)")+"</option>"+["rw","ro","none"].map((r)=>'<option value="'+r+'"'+(rules[g.id]===r?" selected":"")+">"+RIGHTS[r]+"</option>").join("")+'</select></td><td class="meta" data-eff="'+g.id+'"></td></tr>').join("")+"</table>"}
 function bindRules(root){const upd=()=>{const r=readRules(root),e=effective(r);$$("[data-eff]",root).forEach((td)=>td.textContent=RIGHTS[e[td.dataset.eff]])};$$("[data-rule]",root).forEach((s)=>s.onchange=upd);upd()}
 const readRules=(root)=>Object.fromEntries($$("[data-rule]",root).filter((s)=>s.value).map((s)=>[s.dataset.rule,s.value]));
-function keyForm(k){k=k||{regles:{}};return '<label>Nom (ex. « Claude perso »)</label><input name="nom" value="'+esc(k.name||"")+'" required><label>Groupe par défaut (souvenirs sans projet ; doit être en lecture-écriture)</label><select name="defaut">'+groupOpts(k.default_group_id)+'</select><label>Droits</label>'+rulesEditor(k.regles)}
+function keyForm(k){k=k||{regles:{}};return '<label>Nom (ex. « Claude perso »)</label><input name="nom" value="'+esc(k.name||"")+'" required><label>Groupe par défaut (souvenirs sans projet ; doit être en lecture-écriture)</label><select name="defaut">'+groupOpts(k.default_group_id)+'</select><label style="display:flex;gap:8px;align-items:center;color:var(--txt)"><input type="checkbox" name="rappels" style="width:auto"'+(k.show_reminders===0?"":" checked")+'> Affiche les rappels de tâches en début de conversation</label><label>Droits</label>'+rulesEditor(k.regles)}
 async function clesPage(created){state.cur=null;renderList();const j=await api("GET","cles");
 let h=created?'<section class="card" style="border-color:var(--acc)"><h2>Clé créée</h2><p>Copie cette URL dans le connecteur du compte Claude concerné. <b>Elle ne sera plus jamais affichée.</b></p><input readonly value="'+esc(created.url)+'" onclick="this.select()"></section>':"";
 h+='<section class="card"><h2>Clés d\\'accès</h2><p class="meta">Une clé par compte Claude. L\\'URL du connecteur est <code>'+esc(location.origin)+'/&lt;clé&gt;/mcp</code>. Clé maîtresse (MEMORY_SECRET, accès à tout) : <b>'+(j.cle_maitresse_active?"active":"désactivée")+"</b>"+(j.cle_maitresse_active?" — mets MASTER_KEY_ENABLED à « false » une fois tes comptes passés sur leurs propres clés.":"")+"</p>"+
 (j.cles.map((k)=>{const e=effective(k.regles),vis=state.groupes.filter((g)=>e[g.id]!=="none").map((g)=>esc(g.chemin)+(e[g.id]==="ro"?" (lecture)":""));
-return '<div class="item" data-kid="'+k.id+'"'+(k.revoked_at?' style="opacity:.55"':"")+'><div class="t">'+esc(k.name)+(k.revoked_at?" — révoquée le "+day(k.revoked_at):"")+'</div><div class="meta">Défaut : '+esc(gpath(k.default_group_id))+" · créée "+day(k.created_at)+" · dernière utilisation "+(k.last_used_at?day(k.last_used_at):"jamais")+'</div><div class="meta">Accès : '+(vis.join(", ")||"aucun")+"</div>"+
+return '<div class="item" data-kid="'+k.id+'"'+(k.revoked_at?' style="opacity:.55"':"")+'><div class="t">'+esc(k.name)+(k.revoked_at?" — révoquée le "+day(k.revoked_at):"")+'</div><div class="meta">Défaut : '+esc(gpath(k.default_group_id))+" · créée "+day(k.created_at)+" · dernière utilisation "+(k.last_used_at?day(k.last_used_at):"jamais")+(k.show_reminders===0?" · sans rappels":"")+'</div><div class="meta">Accès : '+(vis.join(", ")||"aucun")+"</div>"+
 (k.revoked_at?"":'<div class="acts"><button data-a="kedit">Modifier</button><button data-a="kdel" class="d">Révoquer</button></div>')+"</div>"}).join("")||'<p class="empty">Aucune clé.</p>')+
 '</section><section class="card"><h3 style="margin-top:0">Nouvelle clé</h3><form id="kf">'+keyForm(null)+'<div class="acts"><button class="p">Créer la clé</button></div></form></section>';
 $("#main").innerHTML=h;bindRules($("#kf"));
-$("#kf").onsubmit=async(e)=>{e.preventDefault();const f=e.target;const r=await api("POST","cles",{nom:f.nom.value,groupe_defaut_id:Number(f.defaut.value),regles:readRules(f)});toast("Clé créée");clesPage(r)};
+$("#kf").onsubmit=async(e)=>{e.preventDefault();const f=e.target;const r=await api("POST","cles",{nom:f.nom.value,groupe_defaut_id:Number(f.defaut.value),rappels:f.rappels.checked,regles:readRules(f)});toast("Clé créée");clesPage(r)};
 $$("#main [data-kid]").forEach((el)=>{const k=j.cles.find((x)=>x.id===Number(el.dataset.kid));if(k.revoked_at)return;
 $('[data-a="kedit"]',el).onclick=()=>{el.innerHTML='<form>'+keyForm(k)+'<div class="acts"><button class="p">Enregistrer</button><button type="button" data-a="cancel">Annuler</button></div></form>';const f=$("form",el);bindRules(f);
-f.onsubmit=async(e)=>{e.preventDefault();await api("PATCH","cles/"+k.id,{nom:f.nom.value,groupe_defaut_id:Number(f.defaut.value),regles:readRules(f)});toast("Clé modifiée");clesPage()};$('[data-a="cancel"]',el).onclick=()=>clesPage()};
+f.onsubmit=async(e)=>{e.preventDefault();await api("PATCH","cles/"+k.id,{nom:f.nom.value,groupe_defaut_id:Number(f.defaut.value),rappels:f.rappels.checked,regles:readRules(f)});toast("Clé modifiée");clesPage()};$('[data-a="cancel"]',el).onclick=()=>clesPage()};
 $('[data-a="kdel"]',el).onclick=async()=>{if(!confirm("Révoquer la clé « "+k.name+" » ?\\nLe connecteur qui l'utilise cessera immédiatement de fonctionner."))return;await api("DELETE","cles/"+k.id);toast("Clé révoquée");clesPage()}})}
+
+// --- tâches : types, niveaux de criticité, réglages
+const ALERT_LAB={aucune:"Aucune",notification:"Notification",alarme:"Alarme"};
+function confRow(kind,x,j){const lv=kind==="niveaux";x=x||{};
+const f=(n,lab,v,t,extra)=>'<div><label>'+lab+'</label><input name="'+n+'" type="'+(t||"text")+'" value="'+esc(v??"")+'"'+(extra||"")+"></div>";
+return '<form class="item" data-kind="'+kind+'" data-id="'+(x.id||"")+'"><div class="row">'+f("nom","Nom",x.name)+f("position","Ordre",x.position??0,"number",' min="0" style="max-width:90px"')+
+(lv?f("marqueur","Marqueur",x.marker,"text",' maxlength="4" style="max-width:90px"')+f("horizon_jours","Visible (jours avant)",x.horizon_days??0,"number",' min="0"'):
+'<div><label>Synchro</label><select name="synchro"><option value="">Aucune</option><option value="google"'+(x.sync==="google"?" selected":"")+">Google Agenda</option></select></div>")+"</div>"+
+(lv?'<div class="row"><div><label>Alerte</label><select name="alerte">'+j.alertes.map((a)=>'<option value="'+a+'"'+((x.alert||"aucune")===a?" selected":"")+">"+ALERT_LAB[a]+"</option>").join("")+"</select></div>"+f("plage_debut","Plage : début",x.alert_from||"07:00","time")+f("plage_fin","Plage : fin (24:00 = minuit)",x.alert_to||"24:00","text",' placeholder="HH:MM"')+f("relance_minutes","Relance (min, 0 = jamais)",x.repeat_minutes??0,"number",' min="0"')+"</div>":"")+
+'<label style="display:flex;gap:8px;align-items:center;color:var(--txt)"><input type="checkbox" name="par_defaut" style="width:auto"'+(x.is_default?" checked":"")+"> Par défaut</label>"+
+'<div class="acts"><button class="p">'+(x.id?"Enregistrer":"Ajouter")+"</button>"+(x.id?'<button type="button" class="d" data-a="del">Supprimer</button><span class="meta">'+x.n_taches+" tâche(s)</span>":"")+"</div></form>"}
+const confData=(f)=>{const o={nom:f.nom.value,position:Number(f.position.value),par_defaut:f.par_defaut.checked};
+if(f.dataset.kind==="niveaux")Object.assign(o,{marqueur:f.marqueur.value,horizon_jours:Number(f.horizon_jours.value),alerte:f.alerte.value,plage_debut:f.plage_debut.value,plage_fin:f.plage_fin.value,relance_minutes:Number(f.relance_minutes.value)});else o.synchro=f.synchro.value;return o};
+async function tachesPage(){state.cur=null;renderList();const j=await api("GET","taches-config");
+const sec=(kind,title,list,help)=>'<section class="card"><h2>'+title+'</h2><p class="meta">'+help+"</p>"+list.map((x)=>confRow(kind,x,j)).join("")+"<h3>Ajouter</h3>"+confRow(kind,null,j)+"</section>";
+$("#main").innerHTML=sec("niveaux","Niveaux de criticité",j.niveaux,"Ordre 1 = le plus critique. « Visible » : combien de jours avant l'échéance la tâche apparaît dans les rappels de début de conversation. Alerte, plage et relance serviront aux notifications (ntfy).")+
+sec("types-taches","Types de tâche",j.types,"Le type décide de la synchronisation (Google Agenda pour les rendez-vous).")+
+'<section class="card"><h2>Réglages</h2><form id="regf"><label>Rappels affichés au maximum en début de conversation</label><input name="rappels_max" type="number" min="1" max="50" value="'+esc(j.reglages.rappels_max)+'" style="max-width:120px"><div class="acts"><button class="p">Enregistrer</button></div></form></section>';
+$("#regf").onsubmit=async(e)=>{e.preventDefault();await api("PATCH","reglages",{rappels_max:Number(e.target.rappels_max.value)});toast("Réglages enregistrés")};
+$$("#main form[data-kind]").forEach((f)=>{const kind=f.dataset.kind,id=f.dataset.id;
+f.onsubmit=async(e)=>{e.preventDefault();await api(id?"PATCH":"POST",kind+(id?"/"+id:""),confData(f));toast(id?"Enregistré":"Ajouté");tachesPage()};
+const del=$('[data-a="del"]',f);if(del)del.onclick=async()=>{const list=kind==="niveaux"?j.niveaux:j.types,x=list.find((y)=>y.id===Number(id)),others=list.filter((y)=>y.id!==x.id);
+if(!others.length){toast("Il en faut au moins un.",true);return}let vers="";
+if(x.n_taches||x.is_default){const c=prompt((x.n_taches?x.n_taches+" tâche(s) utilisent « "+x.name+" ». ":"")+"Vers quoi basculer ? Tape le nom :\\n"+others.map((y)=>"- "+y.name).join("\\n"));if(c===null)return;
+const t=others.find((y)=>y.name.toLowerCase()===c.trim().toLowerCase());if(!t){toast("Nom inconnu.",true);return}vers="?vers="+t.id}
+else if(!confirm("Supprimer « "+x.name+" » ?"))return;
+const r=await api("DELETE",kind+"/"+id+vers);toast("Supprimé"+(r.basculees?" ("+r.basculees+" tâche(s) basculée(s))":""));tachesPage()}})}
 
 // --- consommation (garde-fous) et sauvegardes
 const nf=(n)=>Number(n).toLocaleString("fr-FR",{maximumFractionDigits:2});
@@ -221,7 +248,7 @@ $("#main").innerHTML='<section class="card"><h2>Bienvenue</h2><p>Choisis un proj
 $$("#main .tag").forEach((x)=>x.onclick=()=>search("",x.dataset.tag))}
 
 $("#sf").onsubmit=(e)=>{e.preventDefault();const q=$("#sq").value.trim();if(q)search(q)};
-$("#home").onclick=home;$("#nfichiers").onclick=()=>fichiersPage();$("#ngroupes").onclick=groupesPage;$("#ncles").onclick=()=>clesPage();
+$("#home").onclick=home;$("#nfichiers").onclick=()=>fichiersPage();$("#ngroupes").onclick=groupesPage;$("#ncles").onclick=()=>clesPage();$("#ntaches").onclick=tachesPage;
 $("#newp").onclick=()=>{state.cur=null;renderList();$("#main").innerHTML='<section class="card"><h2>Nouveau projet</h2><form id="np"><label>Nom</label><input name="nom" required><div class="row"><div><label>Groupe</label><select name="groupe_id" required>'+groupOpts(null,"— choisir —")+'</select></div><div><label>Statut</label><select name="statut">'+opts(STATUTS,"actif")+'</select></div></div><label>Description</label><textarea name="description" class="big"></textarea><div class="acts"><button class="p">Créer</button></div></form></section>';
 $("#np").onsubmit=async(e)=>{e.preventDefault();const f=e.target;const r=await api("POST","projets",{nom:f.nom.value,groupe_id:Number(f.groupe_id.value),statut:f.statut.value,description:f.description.value});toast("Projet créé");await loadProjets();openProjet(r.id)}};
 loadProjets().then(home).catch(()=>{});

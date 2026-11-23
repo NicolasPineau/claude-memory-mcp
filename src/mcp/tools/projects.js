@@ -1,14 +1,15 @@
 import { createProject, findProject, moveProject, reindexProject, summary } from "../../db/memories.js";
+import { reminders } from "../../db/tasks.js";
 import { readOnlyError } from "../placement.js";
 import { RO, WR, groupeArg, int, str } from "../tool-helpers.js";
 import { day, now } from "../../util.js";
 
 export const PROJECTS_TOOLS = {
   list_projects: {
-    description: "Liste les projets (nom, statut, description, nombre de souvenirs, dernière activité). Avec `noms_seulement: true`, renvoie seulement les noms des projets actifs, rangés par groupe, et des tags (réponse très courte, à utiliser en début de conversation). `groupe` limite à un groupe et ses sous-groupes.",
+    description: "Liste les projets (nom, statut, description, nombre de souvenirs, dernière activité). Avec `noms_seulement: true`, renvoie seulement les noms des projets actifs, rangés par groupe, des tags et les rappels de tâches (réponse très courte, à utiliser en début de conversation). `groupe` limite à un groupe et ses sous-groupes.",
     annotations: RO,
     inputSchema: { type: "object", properties: { noms_seulement: { type: "boolean", description: "Ne renvoyer que les noms des projets et des tags" }, inclure_archives: { type: "boolean", description: "Inclure les projets archivés" }, groupe: groupeArg("Limiter à ce groupe et ses sous-groupes") } },
-    async run(db, a, { acl }) {
+    async run(db, a, { acl, auth }) {
       let scope = acl.readable;
       if (a.groupe) {
         const g = acl.resolve(a.groupe);
@@ -25,7 +26,8 @@ export const PROJECTS_TOOLS = {
           byGroup.get(p.group_id).push(p.name);
         }
         const lines = acl.tree.ordered().filter((g) => byGroup.has(g.id)).map((g) => `${acl.label(g.id)} : ${byGroup.get(g.id).join(", ")}`);
-        return (lines.length ? lines.join("\n") : "Projets : (aucun)") + `\nTags : ${ts.length ? ts.map((r) => r.name).join(", ") : "(aucun)"}`;
+        const rap = auth?.showReminders === false ? "" : await reminders(db, acl, scope);
+        return (rap ? rap + "\n" : "") + (lines.length ? lines.join("\n") : "Projets : (aucun)") + `\nTags : ${ts.length ? ts.map((r) => r.name).join(", ") : "(aucun)"}`;
       }
       let sql = `SELECT p.*, COUNT(m.id) AS n FROM projects p LEFT JOIN memories m ON m.project_id = p.id WHERE ${acl.sqlIn("p.group_id", scope)} `;
       if (!a.inclure_archives) sql += "AND p.status != 'archive' ";
