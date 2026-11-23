@@ -217,10 +217,13 @@ const confData=(f)=>{const o={nom:f.nom.value,position:Number(f.position.value),
 if(f.dataset.kind==="niveaux")Object.assign(o,{marqueur:f.marqueur.value,horizon_jours:Number(f.horizon_jours.value),alerte:f.alerte.value,plage_debut:f.plage_debut.value,plage_fin:f.plage_fin.value,relance_minutes:Number(f.relance_minutes.value)});else o.synchro=f.synchro.value;return o};
 async function tachesPage(){state.cur=null;renderList();const j=await api("GET","taches-config");
 const sec=(kind,title,list,help)=>'<section class="card"><h2>'+title+'</h2><p class="meta">'+help+"</p>"+list.map((x)=>confRow(kind,x,j)).join("")+"<h3>Ajouter</h3>"+confRow(kind,null,j)+"</section>";
-$("#main").innerHTML=sec("niveaux","Niveaux de criticité",j.niveaux,"Ordre 1 = le plus critique. « Visible » : combien de jours avant l'échéance la tâche apparaît dans les rappels de début de conversation. Alerte, plage et relance serviront aux notifications (ntfy).")+
+$("#main").innerHTML=sec("niveaux","Niveaux de criticité",j.niveaux,"Ordre 1 = le plus critique. « Visible » : combien de jours avant l'échéance la tâche apparaît dans les rappels de début de conversation. Alerte : notification ou alarme ntfy, envoyée seulement dans la plage horaire (sinon au début de la suivante), puis relancée toutes les N minutes tant qu'elle n'est ni « Vu » ni faite (0 = jamais).")+
 sec("types-taches","Types de tâche",j.types,"Le type décide de la synchronisation (Google Agenda pour les rendez-vous).")+
-'<section class="card"><h2>Réglages</h2><form id="regf"><label>Rappels affichés au maximum en début de conversation</label><input name="rappels_max" type="number" min="1" max="50" value="'+esc(j.reglages.rappels_max)+'" style="max-width:120px"><div class="acts"><button class="p">Enregistrer</button></div></form></section>';
-$("#regf").onsubmit=async(e)=>{e.preventDefault();await api("PATCH","reglages",{rappels_max:Number(e.target.rappels_max.value)});toast("Réglages enregistrés")};
+'<section class="card"><h2>Réglages</h2><form id="regf"><label>Rappels affichés au maximum en début de conversation</label><input name="rappels_max" type="number" min="1" max="50" value="'+esc(j.reglages.rappels_max)+'" style="max-width:120px">'+
+'<label>Heure des alertes pour les tâches sans heure</label><input name="alerte_matin" type="time" value="'+esc(j.reglages.alerte_matin)+'" style="max-width:140px">'+
+'<label>Choix du bouton « Repousser » : une ligne « Libellé=règle ». Règles : +1h, +30m (à partir de maintenant), 18:00 (prochaine fois qu\\'il est 18 h), +1j, +7j 08:00 (dans N jours)</label><textarea name="reports">'+esc(j.reglages.reports)+'</textarea>'+
+'<div class="acts"><button class="p">Enregistrer</button></div></form></section>';
+$("#regf").onsubmit=async(e)=>{e.preventDefault();const f=e.target;await api("PATCH","reglages",{rappels_max:Number(f.rappels_max.value),alerte_matin:f.alerte_matin.value,reports:f.reports.value});toast("Réglages enregistrés")};
 $$("#main form[data-kind]").forEach((f)=>{const kind=f.dataset.kind,id=f.dataset.id;
 f.onsubmit=async(e)=>{e.preventDefault();await api(id?"PATCH":"POST",kind+(id?"/"+id:""),confData(f));toast(id?"Enregistré":"Ajouté");tachesPage()};
 const del=$('[data-a="del"]',f);if(del)del.onclick=async()=>{const list=kind==="niveaux"?j.niveaux:j.types,x=list.find((y)=>y.id===Number(id)),others=list.filter((y)=>y.id!==x.id);

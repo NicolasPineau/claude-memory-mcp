@@ -11,6 +11,8 @@
 //   - variable "ACCESS_AUD"         : « Application Audience (AUD) Tag » de l'application Access
 //   - variable "ADMIN_EMAILS"       : e-mail(s) autorisé(s), séparés par des virgules
 // Sans les trois variables Access, /admin reste fermé (erreur 503).
+//   - secret "NTFY_TOPIC" (facultatif) : topic ntfy privé des alertes de tâches ; variable "PUBLIC_URL" : adresse du Worker,
+//     pour les boutons des notifications ; "NTFY_URL" et "NTFY_TOKEN" (facultatifs) pour un autre serveur ntfy.
 
 import { handleAdmin } from "./admin/index.js";
 import { ensureSchema } from "./db/schema.js";
@@ -18,6 +20,8 @@ import { downloadResponse, handlePutUpload } from "./files/storage.js";
 import { authenticate, buildAcl } from "./auth/keys.js";
 import { blockedMessage, checkQuota } from "./quota/guard.js";
 import { handleRpc } from "./mcp/protocol.js";
+import { handleTaskLink } from "./alerts/link.js";
+import { runAlerts } from "./alerts/ntfy.js";
 
 // ------------------------------------------------------------------ routage
 export default {
@@ -58,6 +62,14 @@ export default {
       return handlePutUpload(request, db, env.FILES, parts[1]);
     }
 
+    // Liens des notifications de tâches : /t/<jeton signé>[/<action>].
+    if (parts[0] === "t" && (parts.length === 2 || parts.length === 3)) {
+      await ensureSchema(db);
+      const refused = await quotaRefusal();
+      if (refused) return refused;
+      return handleTaskLink(request, env, parts);
+    }
+
     // Connecteur MCP : /<clé>/mcp, avec une clé de /admin ou la clé maîtresse (MEMORY_SECRET).
     if (parts.length !== 2 || parts[1] !== "mcp") return notFound();
     await ensureSchema(db);
@@ -77,5 +89,15 @@ export default {
     const replies = (await Promise.all((batch ? body : [body]).map((m) => handleRpc(m, env, ctx)))).filter(Boolean);
     if (!replies.length) return new Response(null, { status: 202 });
     return Response.json(batch ? replies : replies[0]);
+  },
+
+  // Cron (wrangler.toml, toutes les 15 min) : alertes ntfy des tâches dues. Rien n'est envoyé si un seuil de consommation est atteint.
+  async scheduled(controller, env, ctx) {
+    if (!env.DB || !env.NTFY_TOPIC) return;
+    ctx.waitUntil((async () => {
+      await ensureSchema(env.DB);
+      if ((await checkQuota(env.DB, env)).blocked.length) return;
+      await runAlerts(env.DB, env, { at: new Date(controller.scheduledTime) });
+    })());
   },
 };

@@ -16,6 +16,10 @@ binding = "DB"                       # doit rester exactement "DB"
 database_name = "memoire"
 database_id = "9e1381a5-90c1-4bce-8ca8-d74af8c3c910"
 
+# Alertes ntfy des tâches (src/alerts/ntfy.js) : toutes les 15 minutes.
+[triggers]
+crons = ["*/15 * * * *"]
+
 [observability]
 enabled = true
 

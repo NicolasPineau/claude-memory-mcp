@@ -1,7 +1,7 @@
 import { now } from "../util.js";
 
 // ------------------------------------------------------------------ schéma
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'actif', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
@@ -26,7 +26,7 @@ export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS task_types (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, sync TEXT NOT NULL DEFAULT '', is_default INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS task_levels (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, marker TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0, horizon_days INTEGER NOT NULL DEFAULT 0, alert TEXT NOT NULL DEFAULT 'aucune', alert_from TEXT NOT NULL DEFAULT '07:00', alert_to TEXT NOT NULL DEFAULT '24:00', repeat_minutes INTEGER NOT NULL DEFAULT 0, is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   // Une ligne par tâche, liée à son souvenir (texte, projet, tags, groupe). Échéance en heure de Paris.
-  `CREATE TABLE IF NOT EXISTS tasks (memory_id INTEGER PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE, type_id INTEGER NOT NULL REFERENCES task_types(id), level_id INTEGER NOT NULL REFERENCES task_levels(id), status TEXT NOT NULL DEFAULT 'a_faire' CHECK (status IN ('a_faire', 'silencieux', 'fait', 'annule')), due_date TEXT, due_time TEXT, recur_every INTEGER, recur_unit TEXT, done_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS tasks (memory_id INTEGER PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE, type_id INTEGER NOT NULL REFERENCES task_types(id), level_id INTEGER NOT NULL REFERENCES task_levels(id), status TEXT NOT NULL DEFAULT 'a_faire' CHECK (status IN ('a_faire', 'silencieux', 'fait', 'annule')), due_date TEXT, due_time TEXT, recur_every INTEGER, recur_unit TEXT, done_at TEXT, alert_last TEXT, alert_ack INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS tasks_due ON tasks(status, due_date)`,
   `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 ];
@@ -97,6 +97,12 @@ async function migrate(db) {
     await db.prepare(`INSERT OR IGNORE INTO tasks(memory_id, type_id, level_id, status, created_at, updated_at)
       SELECT id, (SELECT id FROM task_types ORDER BY is_default DESC, position, id LIMIT 1), (SELECT id FROM task_levels ORDER BY is_default DESC, position, id LIMIT 1), 'a_faire', created_at, updated_at
       FROM memories WHERE kind = 'tache'`).run();
+  }
+
+  // v6 : alertes ntfy. Dernier envoi (UTC) et accusé de réception (« Vu »), remis à zéro quand l'échéance ou le statut change.
+  if (version < 6) {
+    await addColumn(db, "tasks", "alert_last", "TEXT");
+    await addColumn(db, "tasks", "alert_ack", "INTEGER NOT NULL DEFAULT 0");
   }
 
   await db.prepare("INSERT INTO schema_meta(key, value) VALUES ('version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(String(SCHEMA_VERSION)).run();
