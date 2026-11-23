@@ -3,7 +3,7 @@ import { generateKey, masterKeyEnabled, sha256hex } from "../auth/keys.js";
 import { ACCESS, MAX_DEPTH, effectiveRights, loadGroups } from "../db/groups.js";
 import { deleteMemory, ftsQuery, moveProject, reindex, reindexProject, setTags, syncMemoryFiles, touchProject } from "../db/memories.js";
 import { deleteFile, storeFile } from "../files/storage.js";
-import { ALERTS, DEFAULT_SETTINGS, getSetting } from "../db/tasks.js";
+import { ALERTS, DEFAULT_SETTINGS, getSetting, parseReports } from "../db/tasks.js";
 import { cleanName, guessMime, jsonOk, normTags, now } from "../util.js";
 
 export const likeArg = (q) => `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
@@ -290,7 +290,17 @@ export async function adminApi(request, db, path, url, env = {}, quota = null) {
   if (res === "reglages" && !id && m === "PATCH") {
     const b = await readJson(request);
     const stmts = [];
-    if (b.rappels_max != null) stmts.push(db.prepare("INSERT INTO settings(key, value) VALUES ('rappels_max', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(String(intIn(b.rappels_max, 1, 50, "Rappels au démarrage"))));
+    const set = (k, v) => stmts.push(db.prepare("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(k, v));
+    if (b.rappels_max != null) set("rappels_max", String(intIn(b.rappels_max, 1, 50, "Rappels au démarrage")));
+    if (b.alerte_matin != null) {
+      if (!HHMM.test(String(b.alerte_matin)) || b.alerte_matin === "24:00") throw new ApiError(400, "Heure des alertes sans heure invalide (HH:MM).");
+      set("alerte_matin", String(b.alerte_matin));
+    }
+    if (b.reports != null) {
+      const r = parseReports(b.reports);
+      if (r.error) throw new ApiError(400, r.error);
+      set("reports", r.list.map((x) => `${x.label}=${x.rule}`).join("\n"));
+    }
     if (stmts.length) await db.batch(stmts);
     return jsonOk({ ok: true });
   }

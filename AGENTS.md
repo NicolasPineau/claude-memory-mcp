@@ -6,13 +6,15 @@ Serveur MCP « mémoire partagée » pour Claude : Cloudflare Worker (JavaScript
 
 | Fichier | Rôle |
 |---|---|
-| `src/index.js` | Point d'entrée : routage `/admin`, `/dl/<jeton>`, `/upload/<jeton>`, `/<clé>/mcp` |
+| `src/index.js` | Point d'entrée : routage `/admin`, `/dl/<jeton>`, `/upload/<jeton>`, `/t/<jeton>`, `/<clé>/mcp` ; `scheduled` (Cron des alertes) |
 | `src/config.js` | Constantes (version, tailles, durées) et `INSTRUCTIONS` envoyées à Claude |
 | `src/util.js` | Utilitaires purs : dates, tags, base64, réponses JSON, comparaison à temps constant |
 | `src/db/schema.js` | Schéma SQL et migrations, appliqués à la première requête (`ensureSchema`) |
 | `src/db/groups.js` | Arbre des groupes, droits effectifs (héritage), `Acl` (filtres SQL, résolution d'un groupe par chemin ou nom) |
 | `src/db/memories.js` | Accès aux souvenirs, projets, tags et à l'index FTS5 |
 | `src/db/tasks.js` | Tâches : dates en heure de Paris, échéances et récurrences, ligne compacte, rappels du début de conversation, réglages (`settings`) |
+| `src/alerts/ntfy.js` | Alertes ntfy des tâches (Cron toutes les 15 min) : plages, relances, liens signés (HMAC, 7 jours) |
+| `src/alerts/link.js` | Liens des notifications `/t/<jeton>` : Fait, Vu, Repousser, Modifier, page mobile |
 | `src/files/storage.js` | Contenu des fichiers dans R2 (`FILES`, objets `f/<id>`) ; lecture des anciens fichiers restés dans D1 (`storage = 'd1'`) ; jetons de téléchargement et d'envoi |
 | `src/mcp/protocol.js` | JSON-RPC MCP (Streamable HTTP sans état) : `initialize`, `tools/list`, `tools/call` |
 | `src/mcp/tool-helpers.js` | Annotations (`RO`, `WR`, `DE`) et aides pour les schémas d'entrée |

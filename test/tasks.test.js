@@ -154,7 +154,7 @@ describe("admin des types et niveaux", () => {
     const j = await admin("GET", "taches-config");
     expect(j.types.map((t) => t.name)).toEqual(["Tâche", "Rendez-vous"]);
     expect(j.niveaux.map((l) => [l.name, l.horizon_days, l.alert])).toEqual([["critique", 7, "alarme"], ["normale", 3, "notification"], ["basse", 0, "aucune"]]);
-    expect(j.reglages).toEqual({ rappels_max: "5" });
+    expect(j.reglages.rappels_max).toBe("5");
   });
 
   it("affiche le type quand ce n'est pas le type par défaut", async () => {

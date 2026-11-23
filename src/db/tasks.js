@@ -1,3 +1,4 @@
+import { memoryTags, reindex, setTags, touchProject } from "./memories.js";
 import { now } from "../util.js";
 
 // ------------------------------------------------------------------ tâches (souvenirs avec échéance, criticité, statut)
@@ -7,7 +8,12 @@ export const ALERTS = ["aucune", "notification", "alarme"];
 export const RECUR_UNITS = ["jour", "semaine", "mois", "an"];
 export const TZ = "Europe/Paris";
 
-export const DEFAULT_SETTINGS = { rappels_max: "5" };
+// Réglages modifiables dans /admin. `reports` : une ligne par choix « Libellé=règle » (voir parseReports).
+export const DEFAULT_SETTINGS = {
+  rappels_max: "5",
+  alerte_matin: "08:00",
+  reports: "+1 h=+1h\nCe soir 18 h=18:00\nDemain matin=+1j 08:00\n+1 semaine=+7j",
+};
 
 // Date et heure courantes à Paris : { date: "AAAA-MM-JJ", time: "HH:MM" }.
 export function parisNow(d = new Date()) {
@@ -99,7 +105,7 @@ export function taskLine(t, today, { defaultTypeId = null, detail = false } = {}
 }
 
 export const TASK_SELECT = `SELECT t.*, t.memory_id AS id, m.title, m.content, m.group_id, m.project_id, p.name AS project,
-  l.name AS level, l.marker, l.position AS level_pos, l.horizon_days, ty.name AS type
+  l.name AS level, l.marker, l.position AS level_pos, l.horizon_days, l.alert, l.alert_from, l.alert_to, l.repeat_minutes, ty.name AS type
   FROM tasks t JOIN memories m ON m.id = t.memory_id LEFT JOIN projects p ON p.id = m.project_id
   JOIN task_levels l ON l.id = t.level_id JOIN task_types ty ON ty.id = t.type_id`;
 
@@ -136,3 +142,110 @@ export async function reminders(db, acl, scope) {
 }
 
 export const touchTask = (db, id) => db.prepare("UPDATE tasks SET updated_at = ? WHERE memory_id = ?").bind(now(), id).run();
+
+// ------------------------------------------------------------------ modification d'une tâche (outil MCP et page mobile)
+const ECH_ERR = "AAAA-MM-JJ ou AAAA-MM-JJ HH:MM";
+export { ECH_ERR };
+
+// Valide et résout les champs d'une modification. Renvoie les colonnes à changer, ou { error }.
+export async function taskFields(db, a) {
+  const out = {};
+  if (a.echeance != null) {
+    const d = parseDue(a.echeance);
+    if (d.error) return d;
+    out.due_date = d.date; out.due_time = d.time;
+  }
+  if (a.recurrence != null) {
+    const r = parseRecurrence(a.recurrence);
+    if (r.error) return r;
+    out.recur_every = r.every; out.recur_unit = r.unit;
+  }
+  if (a.criticite != null && String(a.criticite).trim()) {
+    const id = await findByName(db, "task_levels", a.criticite, "criticité");
+    if (id.error) return id;
+    out.level_id = id;
+  }
+  if (a.type != null && String(a.type).trim()) {
+    const id = await findByName(db, "task_types", a.type, "type");
+    if (id.error) return id;
+    out.type_id = id;
+  }
+  if (a.statut != null) {
+    if (!TASK_STATUSES.includes(a.statut)) return { error: `Erreur : statut invalide (${TASK_STATUSES.join(", ")}).` };
+    out.status = a.statut;
+  }
+  return out;
+}
+
+// Crée l'occurrence suivante d'une tâche récurrente (nouveau souvenir, mêmes projet, groupe, tags, type et niveau).
+async function createNextOccurrence(db, t) {
+  const due = nextDue(t.due_date, t.recur_every, t.recur_unit), ts = now();
+  const m = await db.prepare("SELECT * FROM memories WHERE id = ?").bind(t.memory_id).first();
+  const r = await db.prepare("INSERT INTO memories(title, content, kind, project_id, group_id, source, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)")
+    .bind(m.title, m.content, m.kind, m.project_id, m.group_id, m.source, ts, ts).run();
+  const id = r.meta.last_row_id;
+  await db.prepare("INSERT INTO tasks(memory_id, type_id, level_id, status, due_date, due_time, recur_every, recur_unit, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+    .bind(id, t.type_id, t.level_id, "a_faire", due, t.due_time, t.recur_every, t.recur_unit, ts, ts).run();
+  await setTags(db, id, await memoryTags(db, t.memory_id));
+  await reindex(db, id);
+  return { id, due };
+}
+
+// Applique une modification à la tâche `t` (ligne de TASK_SELECT). `a` : champs de update_task, plus `vu` (accusé de réception).
+// Un changement d'échéance ou de statut réarme les alertes. Renvoie { error } ou { next } (occurrence suivante créée).
+export async function applyTaskUpdate(db, t, a) {
+  const f = await taskFields(db, a);
+  if (f.error) return f;
+  const n = { ...t, ...f };
+  if (n.recur_unit && !n.due_date) return { error: "Erreur : une tâche récurrente doit avoir une échéance." };
+  const ts = now();
+  const becomesDone = n.status === "fait" && t.status !== "fait";
+  n.done_at = n.status === "fait" ? (becomesDone ? ts : t.done_at) : null;
+  const rearm = n.due_date !== t.due_date || n.due_time !== t.due_time || n.status !== t.status || n.level_id !== t.level_id;
+  const ack = a.vu ? 1 : rearm ? 0 : t.alert_ack;
+  await db.prepare("UPDATE tasks SET type_id=?, level_id=?, status=?, due_date=?, due_time=?, recur_every=?, recur_unit=?, done_at=?, alert_last=?, alert_ack=?, updated_at=? WHERE memory_id=?")
+    .bind(n.type_id, n.level_id, n.status, n.due_date, n.due_time, n.recur_every, n.recur_unit, n.done_at, rearm ? null : t.alert_last, ack, ts, t.memory_id).run();
+  const titre = a.titre != null ? String(a.titre).trim() : "";
+  if (titre || a.detail != null) {
+    const title = titre || t.title;
+    await db.prepare("UPDATE memories SET title=?, content=?, updated_at=? WHERE id=?")
+      .bind(title, a.detail != null ? (String(a.detail).trim() || title) : t.content, ts, t.memory_id).run();
+    await reindex(db, t.memory_id);
+  }
+  await touchProject(db, t.project_id);
+  return { next: becomesDone && n.recur_unit && n.due_date ? await createNextOccurrence(db, n) : null };
+}
+
+// ------------------------------------------------------------------ reports (« Repousser »)
+// Règles : « +90m », « +1h » (à partir de maintenant), « 18:00 » (prochaine fois qu'il est 18 h),
+// « +1j » / « +7j 08:00 » (dans N jours, à l'heure donnée, sinon à l'heure actuelle de l'échéance).
+const REPORT_RE = /^(?:\+(\d+)\s*(m|min|h)|([01]?\d|2[0-3]):([0-5]\d)|\+(\d+)\s*j(?:\s+([01]?\d|2[0-3]):([0-5]\d))?)$/i;
+
+export function parseReports(text) {
+  const out = [];
+  for (const raw of String(text ?? "").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const i = line.lastIndexOf("=");
+    const label = line.slice(0, i).trim(), rule = line.slice(i + 1).trim();
+    if (i < 1 || !label || !REPORT_RE.test(rule)) return { error: `Report invalide : « ${line} » (format « Libellé=règle », règles : +1h, +30m, 18:00, +1j, +7j 08:00).` };
+    out.push({ label, rule });
+  }
+  if (!out.length) return { error: "Il faut au moins un choix de report." };
+  return { list: out };
+}
+
+const addDays = (date, n) => new Date(Date.parse(date + "T12:00:00Z") + n * 86400_000).toISOString().slice(0, 10);
+
+// Nouvelle échéance { date, time } pour une règle, à partir de l'instant `at` (Date).
+export function reportTarget(rule, task, at = new Date()) {
+  const m = rule.match(REPORT_RE);
+  if (!m) return null;
+  const p = parisNow(at);
+  if (m[1]) return parisNow(new Date(at.getTime() + Number(m[1]) * (m[2].toLowerCase() === "h" ? 3600_000 : 60_000)));
+  if (m[3] != null) {
+    const time = `${pad(+m[3])}:${m[4]}`;
+    return { date: time > p.time ? p.date : addDays(p.date, 1), time };
+  }
+  return { date: addDays(p.date, Number(m[5])), time: m[6] != null ? `${pad(+m[6])}:${m[7]}` : task.due_time ?? null };
+}
