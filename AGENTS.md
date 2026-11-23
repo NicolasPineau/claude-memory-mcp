@@ -19,6 +19,11 @@ Serveur MCP « mémoire partagée » pour Claude : Cloudflare Worker (JavaScript
 | `src/mcp/tools/*.js` | Outils MCP par domaine : `memories`, `projects`, `groups`, `files` ; `index.js` fixe l'ordre d'exposition |
 | `src/auth/access.js` | Vérification du JWT Cloudflare Access pour `/admin` |
 | `src/auth/keys.js` | Clés d'accès (hash SHA-256), clé maîtresse, construction de l'`Acl` d'une requête |
+| `src/quota/limits.js` | Limites gratuites Cloudflare, seuils par défaut (50 %) et variables `QUOTA_*` |
+| `src/quota/analytics.js` | Lecture de la consommation du compte (API GraphQL Analytics), sans dépendance : partagé avec le script de sauvegarde |
+| `src/quota/guard.js` | Cache de la consommation (`usage_cache`), évaluation des seuils, messages de refus et lignes « ⚠️ Quota » |
+| `scripts/backup.mjs` | Sauvegarde : export D1 (schéma puis données, sans la table FTS), reconstruction des index, envoi dans R2 |
+| `.github/workflows/backup.yml` | Lance la sauvegarde chaque dimanche à 02:00 UTC |
 | `src/admin/` | `/admin` : `index.js` (routage), `api.js` (API JSON), `page.js` (interface HTML) |
 | `test/` | Tests Vitest exécutés dans le runtime Workers, avec une D1 locale |
 
@@ -29,7 +34,9 @@ Serveur MCP « mémoire partagée » pour Claude : Cloudflare Worker (JavaScript
 - Toute modification de comportement s'accompagne d'un test dans `test/`.
 - Ne jamais écrire de secret ni d'identifiant réel dans le code ou les tests.
 - Toute requête MCP sur `projects`, `memories` ou `files` filtre par groupe (`acl.sqlIn(...)`) ; toute écriture vérifie `acl.canWrite(...)`. Un élément hors périmètre répond comme s'il n'existait pas.
-- Un changement de schéma passe par `migrate()` dans `src/db/schema.js` (idempotent) et par `SCHEMA_VERSION`.
+- Un changement de schéma passe par `migrate()` dans `src/db/schema.js` (idempotent) et par `SCHEMA_VERSION`. Une nouvelle table à sauvegarder s'ajoute à `EXPORT_TABLES` dans `scripts/backup.mjs`.
+- Toute nouvelle route qui consomme D1 ou R2 passe par `checkQuota()` et refuse l'appel quand un seuil est atteint.
+- Les tests fixent la consommation avec `usage()` (`test/helpers.js`) : ils ne doivent jamais appeler l'API Analytics réelle.
 
 ## Commandes
 

@@ -16,6 +16,7 @@ import { handleAdmin } from "./admin/index.js";
 import { ensureSchema } from "./db/schema.js";
 import { downloadResponse, handlePutUpload } from "./files/storage.js";
 import { authenticate, buildAcl } from "./auth/keys.js";
+import { blockedMessage, checkQuota } from "./quota/guard.js";
 import { handleRpc } from "./mcp/protocol.js";
 
 // ------------------------------------------------------------------ routage
@@ -35,10 +36,16 @@ export default {
       return handleAdmin(request, env, url, parts);
     }
 
-    // Liens par jeton (sans la clé secrète).
+    // Liens par jeton (sans la clé secrète), refusés quand un seuil de consommation est atteint.
+    const quotaRefusal = async () => {
+      const q = await checkQuota(db, env);
+      return q.blocked.length ? Response.json({ ok: false, erreur: blockedMessage(q) }, { status: 429 }) : null;
+    };
     if (parts.length === 2 && parts[0] === "dl") {
       if (request.method !== "GET") return notFound();
       await ensureSchema(db);
+      const refused = await quotaRefusal();
+      if (refused) return refused;
       const t = await db.prepare("SELECT fichier_id FROM jetons WHERE jeton = ? AND type = 'download' AND expire_le > ?").bind(parts[1], Date.now()).first();
       const f = t && await db.prepare("SELECT * FROM files WHERE id = ?").bind(t.fichier_id).first();
       return f ? downloadResponse(db, f) : notFound();
@@ -46,6 +53,8 @@ export default {
     if (parts.length === 2 && parts[0] === "upload") {
       if (request.method !== "PUT") return notFound();
       await ensureSchema(db);
+      const refused = await quotaRefusal();
+      if (refused) return refused;
       return handlePutUpload(request, db, parts[1]);
     }
 
@@ -63,7 +72,7 @@ export default {
     try { body = await request.json(); }
     catch { return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "JSON invalide" } }, { status: 400 }); }
 
-    const ctx = { origin: url.origin, auth, acl: await buildAcl(db, auth) };
+    const ctx = { origin: url.origin, auth, acl: await buildAcl(db, auth), quota: await checkQuota(db, env) };
     const batch = Array.isArray(body);
     const replies = (await Promise.all((batch ? body : [body]).map((m) => handleRpc(m, env, ctx)))).filter(Boolean);
     if (!replies.length) return new Response(null, { status: 202 });

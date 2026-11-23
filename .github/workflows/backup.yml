@@ -1,0 +1,42 @@
+name: Sauvegarde hebdomadaire
+
+# Export complet de la base D1 vers le bucket R2 privé, chaque dimanche à 02:00 UTC (03:00 ou 04:00 à Paris).
+# Les données ne passent jamais par GitHub : le journal ne contient que des tailles et des noms de fichiers.
+on:
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+    inputs:
+      essai:
+        description: "Essai à blanc (exporte et vérifie les seuils sans rien envoyer)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sauvegarde
+  cancel-in-progress: false
+
+jobs:
+  sauvegarde:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Exporter et envoyer dans R2
+        run: node scripts/backup.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BACKUP_DATABASE: ${{ vars.BACKUP_DATABASE }}
+          BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
+          BACKUP_DRY_RUN: ${{ inputs.essai && '1' || '' }}
+          QUOTA_R2_STORAGE_GB: ${{ vars.QUOTA_R2_STORAGE_GB }}
+          QUOTA_R2_CLASS_A_MONTH: ${{ vars.QUOTA_R2_CLASS_A_MONTH }}

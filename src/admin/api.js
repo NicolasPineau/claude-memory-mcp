@@ -70,10 +70,35 @@ export async function readJson(request) {
   catch { throw new ApiError(400, "JSON invalide."); }
 }
 
-export async function adminApi(request, db, path, url, env = {}) {
+// Sauvegardes présentes dans le bucket R2 lié (binding BACKUPS), les plus récentes d'abord.
+export async function listBackups(env) {
+  if (!env.BACKUPS) return null;
+  const out = [];
+  let cursor;
+  do {
+    const page = await env.BACKUPS.list({ cursor, limit: 1000 });
+    out.push(...page.objects.map((o) => ({ nom: o.key, taille: o.size, date: o.uploaded instanceof Date ? o.uploaded.toISOString() : String(o.uploaded) })));
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  return out.sort((a, b) => b.nom.localeCompare(a.nom));
+}
+
+export async function adminApi(request, db, path, url, env = {}, quota = null) {
   const m = request.method;
   const [res, idRaw] = path;
   const id = idRaw;
+
+  // --- consommation et sauvegardes
+  if (res === "conso" && !id && m === "GET") {
+    return jsonOk({
+      configure: quota?.configured ?? false,
+      verifie_le: quota?.verifiedAt ? new Date(quota.verifiedAt).toISOString() : null,
+      erreur: quota?.error ?? null,
+      metriques: quota?.rows ?? [],
+      bloque: (quota?.blocked ?? []).map((r) => r.metric),
+      sauvegardes: quota?.blocked.length ? null : await listBackups(env),
+    });
+  }
 
   // --- groupes
   if (res === "groupes" && !id && m === "GET") {
