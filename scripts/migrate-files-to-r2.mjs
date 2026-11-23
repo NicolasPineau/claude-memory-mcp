@@ -39,6 +39,11 @@ if (env.MIGRATE_LOCAL !== "1" && (!env.CLOUDFLARE_API_TOKEN || !env.CLOUDFLARE_A
   process.exit(1);
 }
 
+const cols = sql("SELECT name FROM pragma_table_info('files')").map((c) => c.name);
+if (!cols.includes("storage")) {
+  console.error("La base n'est pas encore en v4 (colonne files.storage absente). Elle se met à jour à la première requête du Worker : ouvre /admin une fois, puis relance ce workflow.");
+  process.exit(1);
+}
 const todo = sql("SELECT id, mime, size FROM files WHERE storage = 'd1' ORDER BY size");
 const total = todo.reduce((n, f) => n + f.size, 0);
 console.log(`${todo.length} fichier(s) à migrer, ${mo(total)} au total.`);
