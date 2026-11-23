@@ -25,7 +25,7 @@ export async function handleAdmin(request, env, url, parts) {
   }
   if (parts[1] === "api" && parts.length >= 3 && parts.length <= 4) {
     try {
-      return await adminApi(request, db, parts.slice(2), url);
+      return await adminApi(request, db, parts.slice(2), url, env);
     } catch (e) {
       if (e instanceof ApiError) return jsonErr(e.status, e.message);
       return jsonErr(500, `Erreur interne : ${e.message}`);

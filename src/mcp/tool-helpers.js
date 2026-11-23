@@ -10,3 +10,5 @@ export const str = (description) => ({ type: "string", description });
 export const int = (description) => ({ type: "integer", description });
 
 export const strList = (description) => ({ type: "array", items: { type: "string" }, description });
+
+export const groupeArg = (description = "Groupe : chemin (« Perso/Scoutisme ») ou nom seul s'il est unique") => ({ type: "string", description });

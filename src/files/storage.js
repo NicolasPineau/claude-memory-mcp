@@ -1,19 +1,21 @@
 import { CHUNK_BYTES, MAX_BYTES, MAX_FILE_MB } from "../config.js";
-import { getOrCreateProject, touchProject } from "../db/memories.js";
+import { defaultRootGroupId } from "../db/groups.js";
+import { findProject, touchProject } from "../db/memories.js";
 import { b64ToBytes, bytesToB64, guessMime, jsonErr, now, randomToken } from "../util.js";
 
 // ------------------------------------------------------------------ stockage des fichiers
-// Enregistre un fichier (morceaux base64 déjà découpés). `projectId` prime sur `projet` (nom).
-export async function storeFile(db, { name, mime, size, chunks, description = "", memoryId = null, projet = null, projectId = null }) {
+// Enregistre un fichier (morceaux base64 déjà découpés) dans un groupe, avec projet et souvenir facultatifs.
+export async function storeFile(db, { name, mime, size, chunks, description = "", memoryId = null, projectId = null, groupId }) {
+  if (!groupId) throw new Error("groupe manquant pour le fichier");
   const id = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
-  const pid = projectId || await getOrCreateProject(db, projet);
-  const stmts = [db.prepare("INSERT INTO files(id, filename, mime, size, description, memory_id, project_id, created_at) VALUES (?,?,?,?,?,?,?,?)")
-    .bind(id, name, mime, size, String(description || ""), memoryId || null, pid, now())];
+  const pid = projectId || null;
+  const stmts = [db.prepare("INSERT INTO files(id, filename, mime, size, description, memory_id, project_id, group_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)")
+    .bind(id, name, mime, size, String(description || ""), memoryId || null, pid, groupId, now())];
   if (!chunks.length) chunks = [""];
   chunks.forEach((data, k) => stmts.push(db.prepare("INSERT INTO file_chunks(file_id, idx, data) VALUES (?,?,?)").bind(id, k, data)));
   await db.batch(stmts);
   await touchProject(db, pid);
-  return { id, name, size, projet: projet || null };
+  return { id, name, size };
 }
 
 export function bytesToChunks(bytes) {
@@ -77,6 +79,13 @@ export async function handlePutUpload(request, db, jeton) {
   if (bytes.length > MAX_BYTES) return jsonErr(413, `Fichier trop gros (max ${MAX_FILE_MB} Mo).`);
   const ct = (request.headers.get("Content-Type") || "").split(";")[0].trim();
   const mime = ct && ct !== "application/octet-stream" && ct !== "application/x-www-form-urlencoded" ? ct : guessMime(meta.nom, false);
-  const r = await storeFile(db, { name: meta.nom, mime, size: bytes.length, chunks: bytesToChunks(bytes), description: meta.description, memoryId: meta.souvenir_id, projet: meta.projet });
+  // Le rangement (groupe, projet) est fixé et vérifié à la création du lien. Les liens créés avant la v3 n'ont qu'un nom de projet.
+  let { group_id: groupId, project_id: projectId } = meta;
+  if (!groupId) {
+    const p = await findProject(db, meta.projet);
+    projectId = p ? p.id : null;
+    groupId = p ? p.group_id : await defaultRootGroupId(db);
+  }
+  const r = await storeFile(db, { name: meta.nom, mime, size: bytes.length, chunks: bytesToChunks(bytes), description: meta.description, memoryId: meta.souvenir_id, projectId, groupId });
   return Response.json({ ok: true, id: r.id, nom: r.name, taille: r.size });
 }

@@ -4,7 +4,9 @@
 //
 // Liaisons requises :
 //   - base D1 nommée "DB"
-//   - secret "MEMORY_SECRET" (24 caractères min.) : clé du connecteur MCP
+//   - secret "MEMORY_SECRET" (24 caractères min.) : clé maîtresse du connecteur MCP (accès à tout)
+//   - variable "MASTER_KEY_ENABLED" (facultative) : "false" désactive la clé maîtresse ; les clés par compte
+//     se créent dans /admin et donnent chacune accès à certains groupes.
 //   - variable "ACCESS_TEAM_DOMAIN" : ex. https://mon-equipe.cloudflareaccess.com
 //   - variable "ACCESS_AUD"         : « Application Audience (AUD) Tag » de l'application Access
 //   - variable "ADMIN_EMAILS"       : e-mail(s) autorisé(s), séparés par des virgules
@@ -13,8 +15,8 @@
 import { handleAdmin } from "./admin/index.js";
 import { ensureSchema } from "./db/schema.js";
 import { downloadResponse, handlePutUpload } from "./files/storage.js";
+import { authenticate, buildAcl } from "./auth/keys.js";
 import { handleRpc } from "./mcp/protocol.js";
-import { timingSafeEqual } from "./util.js";
 
 // ------------------------------------------------------------------ routage
 export default {
@@ -47,8 +49,11 @@ export default {
       return handlePutUpload(request, db, parts[1]);
     }
 
-    // Connecteur MCP, protégé par la clé. L'ancienne page /<clé>/fichiers est supprimée : tout passe par /admin.
-    if (parts.length !== 2 || parts[1] !== "mcp" || !timingSafeEqual(parts[0], secret)) return notFound();
+    // Connecteur MCP : /<clé>/mcp, avec une clé de /admin ou la clé maîtresse (MEMORY_SECRET).
+    if (parts.length !== 2 || parts[1] !== "mcp") return notFound();
+    await ensureSchema(db);
+    const auth = await authenticate(db, env, parts[0]);
+    if (!auth) return notFound();
 
     if (request.method === "GET") return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
     if (request.method === "DELETE") return new Response(null, { status: 204 });
@@ -58,7 +63,7 @@ export default {
     try { body = await request.json(); }
     catch { return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "JSON invalide" } }, { status: 400 }); }
 
-    const ctx = { origin: url.origin };
+    const ctx = { origin: url.origin, auth, acl: await buildAcl(db, auth) };
     const batch = Array.isArray(body);
     const replies = (await Promise.all((batch ? body : [body]).map((m) => handleRpc(m, env, ctx)))).filter(Boolean);
     if (!replies.length) return new Response(null, { status: 202 });

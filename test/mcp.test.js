@@ -25,11 +25,11 @@ describe("protocole MCP", () => {
     expect(r.result.instructions).toContain("list_projects");
   });
 
-  it("expose les 14 outils dans l'ordre", async () => {
+  it("expose les 15 outils dans l'ordre", async () => {
     const r = await rpc("tools/list");
     expect(r.result.tools.map((t) => t.name)).toEqual([
       "recall", "remember", "read_memory", "update_memory", "forget",
-      "list_projects", "set_project", "project_context", "list_tags",
+      "list_projects", "set_project", "project_context", "list_tags", "list_groups",
       "attach_file", "prepare_upload", "read_file", "delete_file", "list_files",
     ]);
   });
@@ -42,10 +42,10 @@ describe("protocole MCP", () => {
 
 describe("souvenirs", () => {
   it("enregistre, retrouve (sans accents) et lit un souvenir", async () => {
-    expect(await call("remember", { titre: "Camp d'été", contenu: "Camp farfadets à l'étang.", projet: "Scouts", tags: ["#Scoutisme"] }))
-      .toMatch(/Souvenir #\d+ enregistré\. Projet : Scouts\. Tags : scoutisme\./);
+    expect(await call("remember", { titre: "Camp d'été", contenu: "Camp farfadets à l'étang.", projet: "Scouts", groupe: "Perso", tags: ["#Scoutisme"] }))
+      .toMatch(/Souvenir #\d+ enregistré\. Projet : Scouts \(créé\)\. Groupe : Perso\. Tags : scoutisme\./);
     expect(await call("recall", { requete: "etang" })).toContain("Camp d'été");
-    expect(await call("list_projects", { noms_seulement: true })).toBe("Projets : Scouts\nTags : scoutisme");
+    expect(await call("list_projects", { noms_seulement: true })).toMatch(/^Perso : Scouts\nTags : scoutisme/);
   });
 });
 
