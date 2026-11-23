@@ -22,11 +22,16 @@ enabled = true
 [observability.logs]
 enabled = true
 
-# Sauvegardes (voir docs/spec-sauvegardes-quotas.md). Décommenter UNE FOIS le bucket créé dans R2,
-# sinon le déploiement échoue. Permet de lister et télécharger les sauvegardes depuis /admin.
-# [[r2_buckets]]
-# binding = "BACKUPS"
-# bucket_name = "memoire-sauvegardes"
+# Buckets R2 privés. Ils doivent exister AVANT le déploiement, sinon celui-ci échoue (l'ancienne version reste en ligne).
+# Contenu des fichiers joints (objets f/<id>). Pas de règle de cycle de vie sur ce bucket.
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "memoire-fichiers"
+
+# Sauvegardes hebdomadaires (db/AAAA-MM-JJ.sql.gz, et copie des fichiers dans files/<id>), listées dans /admin.
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "memoire-sauvegardes"
 
 # Garde-fous de consommation : définir sur le Worker (Settings > Variables and Secrets), pas ici :
 #   CF_ACCOUNT_ID  (variable)  identifiant du compte Cloudflare

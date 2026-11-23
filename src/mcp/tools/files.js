@@ -1,8 +1,8 @@
-import { CHUNK, DL_TTL_MS, MAX_BYTES, MAX_FILE_MB, UP_TTL_MS } from "../../config.js";
-import { createToken, deleteFile, storeFile } from "../../files/storage.js";
+import { DL_TTL_MS, MAX_BYTES, MAX_FILE_MB, UP_TTL_MS } from "../../config.js";
+import { createToken, deleteFile, fileBytes, storeFile } from "../../files/storage.js";
 import { readOnlyError, resolvePlacement } from "../placement.js";
 import { DE, RO, WR, groupeArg, int, str } from "../tool-helpers.js";
-import { b64Size, b64ToBytes, cleanName, day, guessMime, utf8ToB64 } from "../../util.js";
+import { b64Size, b64ToBytes, bytesToB64, cleanName, day, guessMime, utf8ToB64 } from "../../util.js";
 
 // Rangement d'un fichier : celui du souvenir lié, sinon du projet, sinon `groupe` ou le groupe par défaut.
 async function filePlacement(db, acl, a) {
@@ -24,7 +24,7 @@ export const FILES_TOOLS = {
     description: "Conserve un petit fichier dans la mémoire en passant son contenu : `contenu_texte` (texte, code, markdown, csv…) ou `contenu_base64`. Pour un fichier binaire ou volumineux, préfère `prepare_upload` (le contenu ne passe pas par la conversation). Rattache-le à un `souvenir_id` et/ou un `projet` ; sinon il va dans `groupe` ou le groupe par défaut.",
     annotations: WR,
     inputSchema: { type: "object", required: ["nom_fichier"], properties: { nom_fichier: str("Nom du fichier"), contenu_texte: str("Contenu texte"), contenu_base64: str("Contenu binaire en base64"), description: str("Description"), souvenir_id: int("Souvenir lié"), projet: str("Projet lié"), groupe: groupeArg() } },
-    async run(db, a, { acl }) {
+    async run(db, a, { acl, env }) {
       const hasT = a.contenu_texte != null, hasB = a.contenu_base64 != null;
       if (hasT === hasB) return "Erreur : fournis soit contenu_texte, soit contenu_base64.";
       let b64;
@@ -38,9 +38,7 @@ export const FILES_TOOLS = {
       const place = await filePlacement(db, acl, a);
       if (place.error) return place.error;
       const name = cleanName(a.nom_fichier);
-      const chunks = [];
-      for (let i = 0; i < b64.length; i += CHUNK) chunks.push(b64.slice(i, i + CHUNK));
-      const f = await storeFile(db, { name, mime: guessMime(name, hasT), size, chunks, description: a.description, memoryId: place.memoryId, projectId: place.projectId, groupId: place.groupId });
+      const f = await storeFile(db, env.FILES, { name, mime: guessMime(name, hasT), bytes: b64ToBytes(b64), description: a.description, memoryId: place.memoryId, projectId: place.projectId, groupId: place.groupId });
       return `Fichier « ${f.name} » enregistré (id=${f.id}, ${f.size} octets, groupe ${acl.tree.path(place.groupId)}).`;
     },
   },
@@ -71,15 +69,15 @@ export const FILES_TOOLS = {
         const t = await createToken(db, "download", { fichierId: f.id, ttl: DL_TTL_MS });
         return head + `Lien de téléchargement (expire le ${t.expire_le}) :\n${ctx.origin}/dl/${t.jeton}`;
       }
-      const chunks = (await db.prepare("SELECT data FROM file_chunks WHERE file_id = ? ORDER BY idx").bind(f.id).all()).results;
-      const b64 = chunks.map((c) => c.data).join("");
+      const bytes = await fileBytes(db, ctx.env.FILES, f);
+      if (!bytes) return `Fichier ${a.id} : contenu introuvable.`;
       if (f.mime.startsWith("text/") || f.mime === "application/json" || f.mime === "application/xml") {
         try {
-          return head + "\n" + new TextDecoder("utf-8", { fatal: true }).decode(b64ToBytes(b64));
+          return head + "\n" + new TextDecoder("utf-8", { fatal: true }).decode(bytes);
         } catch (_) { // binaire
         }
       }
-      return head + "Contenu base64 :\n" + b64;
+      return head + "Contenu base64 :\n" + bytesToB64(bytes);
     },
   },
 
@@ -87,11 +85,11 @@ export const FILES_TOOLS = {
     description: "Supprime définitivement un fichier conservé (son contenu et ses liens de téléchargement). Irréversible : demande confirmation à l'utilisateur avant. Les souvenirs liés ne sont pas touchés.",
     annotations: DE,
     inputSchema: { type: "object", required: ["id"], properties: { id: str("Identifiant du fichier (voir list_files)") } },
-    async run(db, a, { acl }) {
+    async run(db, a, { acl, env }) {
       const g = await db.prepare("SELECT group_id FROM files WHERE id = ? AND " + acl.sqlIn("group_id")).bind(String(a.id || "").trim()).first();
       if (!g) return `Fichier ${a.id} introuvable.`;
       if (!acl.canWrite(g.group_id)) return readOnlyError(acl, g.group_id);
-      const f = await deleteFile(db, String(a.id || "").trim());
+      const f = await deleteFile(db, env.FILES, String(a.id || "").trim());
       return f ? `Fichier « ${f.filename} » (id=${f.id}) supprimé.` : `Fichier ${a.id} introuvable.`;
     },
   },

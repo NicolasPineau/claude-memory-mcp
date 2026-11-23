@@ -13,7 +13,7 @@ Tool names are in English; tool descriptions, parameters and server instructions
 - **Groups**: every project belongs to a group, in a tree up to 3 levels deep (e.g. `Perso › Scoutisme`, `Pro`). Projects can move between groups with their memories and files.
 - **Access keys**: one connector URL per Claude account, each with read-write, read-only or no access per group, inherited by sub-groups (e.g. your work account only sees `Pro`).
 - **Tags**: free-form thematic tags.
-- **Files**: attach files up to 20 MB, stored in D1 in chunks. Small text files can go through the tools directly; larger ones use short-lived upload links (10 min) and download links (1 h).
+- **Files**: attach files up to 20 MB, stored in a private R2 bucket (the database only keeps their metadata). Small text files can go through the tools directly; larger ones use short-lived upload links (10 min) and download links (1 h). A cleanup page in `/admin` lists them by size, with search, filters, preview and bulk delete.
 - **Built-in instructions** that tell Claude how to use the memory: list project names once at the start, load a project only when relevant, save nothing mid-conversation, offer a summary at the end, and never store secrets.
 - **Admin web UI** at `/admin` to browse, edit and upload, protected by Cloudflare Access.
 - **Free-tier guards**: the Worker reads the account's real usage (Workers requests, D1 rows and size, R2 storage and operations) and refuses calls before reaching the free limits. Every MCP response carries a `⚠️ Quota` warning from 80 % of a threshold.
@@ -149,13 +149,22 @@ Thresholds default to **50 % of the Cloudflare free limits**, to keep a margin i
 
 Time Travel restores D1 to any minute of the last 7 days on the free plan. For longer, a GitHub Actions workflow (`.github/workflows/backup.yml`) exports the database every Sunday at 02:00 UTC, compresses it and stores it in a private R2 bucket. The data never goes through GitHub: the job log only shows sizes and file names. The backup is skipped (and the job fails) if the usage can't be checked or if it would cross an R2 threshold.
 
+Each run stores `db/YYYY-MM-DD.sql.gz` (the whole database) and copies the attached files that are not backed up yet to `files/<id>` (once per file: files never change).
+
 Setup, once:
 
-1. In Cloudflare, enable R2 and create a private bucket `memoire-sauvegardes`. Add a lifecycle rule that deletes objects after 60 days.
+1. In Cloudflare, enable R2 and create two private buckets:
+   - `memoire-fichiers`, for attached files, **without** any lifecycle rule;
+   - `memoire-sauvegardes`, with a lifecycle rule that deletes objects **with the prefix `db/`** after 60 days.
+
+   Both must exist before deploying: they are bound in `wrangler.toml` (`FILES` and `BACKUPS`).
 2. Create an API token with *Account Analytics: Read*, *D1: Edit* and *Workers R2 Storage: Edit*.
 3. In the GitHub repository, add the secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Optional repository variables: `BACKUP_DATABASE` (default `memoire`), `BACKUP_BUCKET` (default `memoire-sauvegardes`).
 4. Run the workflow once by hand (**Actions → Sauvegarde hebdomadaire → Run workflow**), first as a dry run.
-5. To list and download backups from `/admin`, uncomment the `[[r2_buckets]]` block in `wrangler.toml`.
+
+### Moving files from D1 to R2 (upgrade from v2/v3)
+
+Before v4, file contents were stored in D1 as base64 chunks. New files now go to R2, and old ones stay readable. To move the old ones, run **Actions → Migrer les fichiers vers R2** by hand: first as a dry run (the default), then for real. It checks each file's size, writes it to R2, and only then removes it from D1. It can be run again safely. The Worker can't do it itself: decoding megabytes of base64 exceeds its 10 ms CPU limit on the free plan.
 
 GitHub disables scheduled workflows after 60 days without activity in the repository: re-enable it in the Actions tab if needed.
 
@@ -170,7 +179,7 @@ npx wrangler d1 create memoire-restauree
 npx wrangler d1 execute memoire-restauree --remote --file backup.sql
 ```
 
-Then point `database_name` and `database_id` in `wrangler.toml` to the new database and deploy. For a mistake made less than 7 days ago, D1 Time Travel is simpler: `npx wrangler d1 time-travel restore memoire --timestamp=<unix time>`.
+Then point `database_name` and `database_id` in `wrangler.toml` to the new database and deploy. Attached files are in `memoire-sauvegardes/files/<id>`: copy them back to `memoire-fichiers/f/<id>` if the files bucket was lost. For a mistake made less than 7 days ago, D1 Time Travel is simpler: `npx wrangler d1 time-travel restore memoire --timestamp=<unix time>`.
 
 ## Development
 

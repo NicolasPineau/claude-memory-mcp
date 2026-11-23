@@ -2,7 +2,7 @@ import { MAX_BYTES, MAX_FILE_MB, STATUTS } from "../config.js";
 import { generateKey, masterKeyEnabled, sha256hex } from "../auth/keys.js";
 import { ACCESS, MAX_DEPTH, effectiveRights, loadGroups } from "../db/groups.js";
 import { deleteMemory, ftsQuery, moveProject, reindex, reindexProject, setTags, syncMemoryFiles, touchProject } from "../db/memories.js";
-import { bytesToChunks, deleteFile, storeFile } from "../files/storage.js";
+import { deleteFile, storeFile } from "../files/storage.js";
 import { cleanName, guessMime, jsonOk, normTags, now } from "../util.js";
 
 export const likeArg = (q) => `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
@@ -76,7 +76,7 @@ export async function listBackups(env) {
   const out = [];
   let cursor;
   do {
-    const page = await env.BACKUPS.list({ cursor, limit: 1000 });
+    const page = await env.BACKUPS.list({ prefix: "db/", cursor, limit: 1000 });
     out.push(...page.objects.map((o) => ({ nom: o.key, taille: o.size, date: o.uploaded instanceof Date ? o.uploaded.toISOString() : String(o.uploaded) })));
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
@@ -300,6 +300,22 @@ export async function adminApi(request, db, path, url, env = {}, quota = null) {
   }
 
   // --- fichiers
+  if (res === "fichiers" && !id && m === "GET") {
+    const rows = (await db.prepare("SELECT f.id, f.filename, f.mime, f.size, f.description, f.memory_id, f.project_id, f.group_id, f.storage, f.created_at, p.name AS projet FROM files f LEFT JOIN projects p ON p.id = f.project_id ORDER BY f.size DESC").all()).results;
+    return jsonOk({ fichiers: rows });
+  }
+  if (res === "fichiers" && id === "supprimer" && m === "POST") {
+    const b = await readJson(request);
+    const ids = [...new Set((Array.isArray(b.ids) ? b.ids : []).map(String))];
+    if (!ids.length) throw new ApiError(400, "Aucun fichier sélectionné.");
+    if (ids.length > 200) throw new ApiError(400, "200 fichiers au maximum par suppression.");
+    let n = 0, octets = 0;
+    for (const fid of ids) {
+      const f = await deleteFile(db, env.FILES, fid);
+      if (f) { n++; octets += f.size; }
+    }
+    return jsonOk({ ok: true, supprimes: n, octets });
+  }
   if (res === "fichiers" && !id && m === "POST") {
     const len = parseInt(request.headers.get("Content-Length") || "0");
     if (len > MAX_BYTES * 5 + 1_000_000) throw new ApiError(413, `Envoi trop gros (max ${MAX_FILE_MB} Mo par fichier).`);
@@ -316,7 +332,7 @@ export async function adminApi(request, db, path, url, env = {}, quota = null) {
       const name = cleanName(f.name);
       const bytes = new Uint8Array(await f.arrayBuffer());
       const mime = f.type && f.type !== "application/octet-stream" ? f.type : guessMime(name, false);
-      const r = await storeFile(db, { name, mime, size: bytes.length, chunks: bytesToChunks(bytes), description, projectId: pid, groupId });
+      const r = await storeFile(db, env.FILES, { name, mime, bytes, description, projectId: pid, groupId });
       out.push({ id: r.id, nom: r.name, taille: r.size });
     }
     return jsonOk({ ok: true, fichiers: out });
@@ -334,7 +350,7 @@ export async function adminApi(request, db, path, url, env = {}, quota = null) {
     return jsonOk({ ok: true });
   }
   if (res === "fichiers" && id && m === "DELETE") {
-    const f = await deleteFile(db, id);
+    const f = await deleteFile(db, env.FILES, id);
     if (!f) throw new ApiError(404, "Fichier introuvable.");
     return jsonOk({ ok: true });
   }

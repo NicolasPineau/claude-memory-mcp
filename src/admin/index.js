@@ -27,7 +27,7 @@ export async function handleAdmin(request, env, url, parts) {
   }
   if (parts[1] === "fichiers" && parts.length === 3 && request.method === "GET") {
     const f = await db.prepare("SELECT * FROM files WHERE id = ?").bind(parts[2]).first();
-    return f ? downloadResponse(db, f) : new Response("Not found", { status: 404 });
+    return f ? downloadResponse(db, env.FILES, f, { inline: url.searchParams.has("voir") }) : new Response("Not found", { status: 404 });
   }
   if (parts[1] === "sauvegardes" && parts.length === 3 && request.method === "GET") {
     if (!env.BACKUPS) return new Response("Bucket de sauvegardes non lié (binding BACKUPS).", { status: 404 });
