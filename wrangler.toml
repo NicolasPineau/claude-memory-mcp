@@ -1,0 +1,13 @@
+# Configuration du Worker, utilisée par `wrangler deploy` et par Workers Builds (déploiement depuis GitHub).
+name = "memory"                      # nom du Worker existant dans Cloudflare
+main = "src/index.js"
+compatibility_date = "2026-11-15"
+
+# Conserve les variables définies dans le tableau de bord (ACCESS_*, ADMIN_EMAILS) à chaque déploiement.
+# Les secrets (MEMORY_SECRET) ne sont jamais touchés par un déploiement.
+keep_vars = true
+
+[[d1_databases]]
+binding = "DB"                       # doit rester exactement "DB"
+database_name = "memoire"
+database_id = "9e1381a5-90c1-4bce-8ca8-d74af8c3c910"
