@@ -59,7 +59,11 @@ Deux approches possibles (voir §6) :
 - **Liens d'envoi et de téléchargement** : réponse 429 avec le même message.
 - **Sauvegarde** : elle est sautée si elle ferait dépasser un seuil R2, et le saut est consigné.
 - **`/admin`** : reste accessible pour voir la consommation, mais refuse les écritures.
-- **Avertissement** à 80 % du seuil : bandeau dans `/admin` et ligne ajoutée à la réponse des outils MCP.
+- **Avertissement** à partir de 80 % d'un seuil :
+  - une ligne est ajoutée à la fin de **la réponse de chaque outil MCP**, lectures comme écritures, par exemple « ⚠️ Quota : lignes D1 écrites 41 200 / 50 000 (82 %) aujourd'hui, remise à zéro à minuit UTC. » ;
+  - la même ligne apparaît quand l'API Analytics ne répond pas (« ⚠️ Quota : consommation non vérifiée depuis HH:MM ») ;
+  - les instructions du serveur (`INSTRUCTIONS`) demandent à Claude de **signaler toute ligne « ⚠️ Quota » à l'utilisateur** dans sa réponse ;
+  - un bandeau s'affiche dans `/admin`.
 
 ### Tableau de bord dans `/admin`
 
@@ -81,6 +85,7 @@ Consommation du jour et du mois pour chaque métrique : valeur, seuil, limite r�
 ## 5. Critères d'acceptation
 
 - [ ] Au-delà d'un seuil, tous les outils MCP refusent l'appel avec un message clair, sans requête D1.
+- [ ] Entre 80 % et 100 % d'un seuil, chaque réponse d'outil MCP se termine par la ligne « ⚠️ Quota » avec la métrique concernée.
 - [ ] Les seuils se règlent par variable d'environnement, sans redéploiement.
 - [ ] `/admin` affiche la consommation et reste consultable quand un seuil est atteint.
 - [ ] Une sauvegarde hebdomadaire arrive dans R2. Il n'en reste jamais plus que `BACKUP_KEEP`.
@@ -97,7 +102,7 @@ Consommation du jour et du mois pour chaque métrique : valeur, seuil, limite r�
 | Rétention | **Règle de cycle de vie R2** : suppression automatique après 60 jours | Plus simple et plus sûr qu'un code de nettoyage. La suppression est gratuite. |
 | Seuils | **50 % des limites gratuites** | Marge confortable si les offres gratuites baissent. Réglables à tout moment. |
 | Comportement au seuil | **Tout est refusé** (lectures et écritures) jusqu'à la remise à zéro de la période | C'est la consigne : on compte tout et on refuse dès qu'un seuil est atteint. |
-| Alertes | Bandeau dans `/admin` à 80 % et à 100 % du seuil, et ligne d'avertissement dans les réponses MCP à 80 %. Pas d'e-mail maison. | Cloudflare envoie déjà un e-mail quand une limite D1 est atteinte. Inutile d'ajouter un service d'envoi. |
+| Alertes | Ligne « ⚠️ Quota » dans **toutes** les réponses MCP dès 80 % d'un seuil, relayée à l'utilisateur par Claude. Bandeau dans `/admin` à 80 % et à 100 %. Pas d'e-mail maison. | Cloudflare envoie déjà un e-mail quand une limite D1 est atteinte. Inutile d'ajouter un service d'envoi. |
 
 ## 7. Prérequis côté Cloudflare (à faire par l'utilisateur)
 
