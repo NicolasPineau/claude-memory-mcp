@@ -3,7 +3,7 @@ import { generateKey, masterKeyEnabled, sha256hex } from "../auth/keys.js";
 import { ACCESS, MAX_DEPTH, effectiveRights, loadGroups } from "../db/groups.js";
 import { deleteMemory, ftsQuery, moveProject, reindex, reindexProject, setTags, syncMemoryFiles, touchProject } from "../db/memories.js";
 import { deleteFile, storeFile } from "../files/storage.js";
-import { ALERTS, DEFAULT_SETTINGS, getSetting, parseReports } from "../db/tasks.js";
+import { ALERTS, DEFAULT_SETTINGS, TASK_SELECT, applyTaskUpdate, ensureTaskRow, getSetting, parseReports, recurrenceLabel } from "../db/tasks.js";
 import { getSync, googleConfigured, listCalendars, setSync, syncGoogle } from "../google/calendar.js";
 import { cleanName, guessMime, jsonOk, normTags, now } from "../util.js";
 
@@ -109,6 +109,27 @@ async function saveTaskConf(db, res, id, f) {
     if (/UNIQUE/i.test(e.message)) throw new ApiError(409, `« ${f.name} » existe déjà.`);
     throw e;
   }
+}
+
+// Champs de tâche des souvenirs « tache » affichés dans /admin.
+async function tasksByMemory(db, ids) {
+  const map = {};
+  if (!ids.length) return map;
+  const rows = (await db.prepare(`${TASK_SELECT} WHERE t.memory_id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all()).results;
+  for (const t of rows) map[t.memory_id] = { statut: t.status, date: t.due_date, heure: t.due_time, criticite: t.level, type: t.type, recurrence: recurrenceLabel(t), synchro: !!t.gcal_event_id };
+  return map;
+}
+
+// Applique les champs de tâche envoyés par /admin (`tache` : { statut, echeance, criticite, type, recurrence }).
+async function saveTaskFromAdmin(db, mid, tache) {
+  await ensureTaskRow(db, mid);
+  if (!tache || typeof tache !== "object") return;
+  const t = await db.prepare(`${TASK_SELECT} WHERE t.memory_id = ?`).bind(mid).first();
+  if (!t) return;
+  const a = {};
+  for (const k of ["statut", "echeance", "criticite", "type", "recurrence"]) if (tache[k] != null) a[k] = String(tache[k]);
+  const r = await applyTaskUpdate(db, t, a);
+  if (r.error) throw new ApiError(400, r.error.replace(/^Erreur : /, ""));
 }
 
 export class ApiError extends Error {
@@ -379,7 +400,8 @@ export async function adminApi(request, db, path, url, env = {}, quota = null) {
     const args = pid ? [pid] : gid ? [gid] : [];
     const souvenirs = (await db.prepare(`SELECT id, title, content, kind, source, group_id, project_id, created_at, updated_at FROM memories WHERE ${cond} ORDER BY updated_at DESC`).bind(...args).all()).results;
     const tags = await tagsByMemory(db, souvenirs.map((s) => s.id));
-    for (const s of souvenirs) s.tags = tags[s.id] || [];
+    const taches = await tasksByMemory(db, souvenirs.filter((s) => s.kind === "tache").map((s) => s.id));
+    for (const s of souvenirs) { s.tags = tags[s.id] || []; if (taches[s.id]) s.tache = taches[s.id]; }
     const fichiers = (await db.prepare(`SELECT id, filename, mime, size, description, memory_id, project_id, group_id, created_at FROM files WHERE ${cond} ORDER BY created_at DESC`).bind(...args).all()).results;
     return jsonOk({ projet, groupe_id: projet ? projet.group_id : gid, souvenirs, fichiers });
   }
@@ -426,6 +448,7 @@ export async function adminApi(request, db, path, url, env = {}, quota = null) {
     await setTags(db, mid, normTags(b.tags));
     await reindex(db, mid);
     await touchProject(db, pid);
+    await saveTaskFromAdmin(db, mid, b.tache);
     return jsonOk({ ok: true, id: mid });
   }
   if (res === "souvenirs" && id && m === "PATCH") {
@@ -443,6 +466,7 @@ export async function adminApi(request, db, path, url, env = {}, quota = null) {
     if (b.tags != null) await setTags(db, r.id, normTags(b.tags));
     await reindex(db, r.id);
     await touchProject(db, pid);
+    await saveTaskFromAdmin(db, r.id, b.tache);
     return jsonOk({ ok: true });
   }
   if (res === "souvenirs" && id && m === "DELETE") {

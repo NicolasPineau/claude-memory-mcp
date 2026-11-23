@@ -64,7 +64,7 @@ const opts=(list,cur)=>list.map((v)=>'<option'+(v===cur?" selected":"")+">"+esc(
 const projOpts=(cur)=>'<option value="">— aucun projet —</option>'+state.projets.map((p)=>'<option value="'+p.id+'"'+(p.id===cur?" selected":"")+">"+esc(p.name)+" ("+esc(gpath(p.group_id))+")</option>").join("");
 const groupOpts=(cur,empty)=>(empty?'<option value="">'+esc(empty)+"</option>":"")+state.groupes.map((g)=>'<option value="'+g.id+'"'+(g.id===cur?" selected":"")+">"+esc(g.chemin)+"</option>").join("");
 
-async function loadProjets(){const [g,j]=await Promise.all([api("GET","groupes"),api("GET","projets")]);state.groupes=g.groupes;state.maxDepth=g.profondeur_max;state.projets=j.projets;state.sans=j.sans_projet;renderList()}
+async function loadProjets(){const [g,j,tc]=await Promise.all([api("GET","groupes"),api("GET","projets"),api("GET","taches-config")]);state.tconf=tc;state.groupes=g.groupes;state.maxDepth=g.profondeur_max;state.projets=j.projets;state.sans=j.sans_projet;renderList()}
 function renderList(){const act=state.projets.filter((p)=>p.status!=="archive"),arc=state.projets.filter((p)=>p.status==="archive");
 const li=(p,lab)=>'<li data-k="p:'+p.id+'" class="'+(state.cur==="p:"+p.id?"sel ":"")+(p.status==="archive"?"arch":"")+'"><span>'+esc(lab||p.name)+'</span><span class="n">'+p.n_souvenirs+(p.n_fichiers?" · "+p.n_fichiers+" 📎":"")+"</span></li>";
 let h="";for(const g of state.groupes){const ps=act.filter((p)=>p.group_id===g.id),o=state.sans.find((x)=>x.group_id===g.id);
@@ -74,12 +74,22 @@ h+='<h3 style="padding-left:'+(g.niveau-1)*12+'px" title="'+esc(g.chemin)+'">'+e
 if(arc.length)h+="<h3>Archivés</h3><ul>"+arc.map((p)=>li(p,p.name+" — "+gpath(p.group_id))).join("")+"</ul>";$("#plist").innerHTML=h;
 $$("#plist li[data-k]").forEach((l)=>l.onclick=()=>{const [t,id]=l.dataset.k.split(":");t==="p"?openProjet(Number(id)):openOrphans(Number(id))})}
 
+function taskFields(t){t=t||{};const c=state.tconf||{niveaux:[],types:[]},dl=c.niveaux.find((l)=>l.is_default),dt=c.types.find((x)=>x.is_default);
+const sel=(n,list,cur)=>'<select name="'+n+'">'+list.map((x)=>"<option"+(x.name===cur?" selected":"")+">"+esc(x.name)+"</option>").join("")+"</select>";
+return '<fieldset data-task style="border:1px solid var(--bd);border-radius:8px;margin-top:10px;padding:4px 12px 10px"><legend class="meta">Tâche</legend><div class="row"><div><label>Date</label><input name="t_date" type="date" value="'+esc(t.date||"")+'"></div><div><label>Heure (facultative)</label><input name="t_heure" type="time" value="'+esc(t.heure||"")+'"></div><div><label>Criticité</label>'+sel("t_crit",c.niveaux,t.criticite||(dl&&dl.name))+"</div></div>"+
+'<div class="row"><div><label>Type</label>'+sel("t_type",c.types,t.type||(dt&&dt.name))+'</div><div><label>Statut</label><select name="t_statut">'+Object.keys(TSTAT).map((k)=>'<option value="'+k+'"'+((t.statut||"a_faire")===k?" selected":"")+">"+TSTAT[k]+"</option>").join("")+'</select></div><div><label>Récurrence (ex. 1 mois)</label><input name="t_rec" value="'+esc(t.recurrence||"")+'"></div></div></fieldset>'}
 function memForm(m,pid,gid){m=m||{};return '<label>Titre</label><input name="titre" value="'+esc(m.title)+'" required><label>Contenu</label><textarea name="contenu" class="big" required>'+esc(m.content)+'</textarea>'+
 '<div class="row"><div><label>Tags (séparés par des virgules)</label><input name="tags" value="'+esc((m.tags||[]).join(", "))+'"></div><div><label>Type</label><select name="type">'+opts(TYPES,m.kind||"note")+'</select></div></div>'+
-'<div class="row"><div><label>Projet</label><select name="projet_id">'+projOpts(pid)+'</select></div><div><label>Groupe (si aucun projet)</label><select name="groupe_id">'+groupOpts(gid)+"</select></div></div>"}
-const memData=(f)=>({titre:f.titre.value,contenu:f.contenu.value,type:f.type.value,projet_id:f.projet_id.value?Number(f.projet_id.value):null,groupe_id:Number(f.groupe_id.value),tags:f.tags.value.split(",").map((s)=>s.trim()).filter(Boolean)});
+'<div class="row"><div><label>Projet</label><select name="projet_id">'+projOpts(pid)+'</select></div><div><label>Groupe (si aucun projet)</label><select name="groupe_id">'+groupOpts(gid)+"</select></div></div>"+taskFields(m.tache)}
+const memData=(f)=>{const o={titre:f.titre.value,contenu:f.contenu.value,type:f.type.value,projet_id:f.projet_id.value?Number(f.projet_id.value):null,groupe_id:Number(f.groupe_id.value),tags:f.tags.value.split(",").map((s)=>s.trim()).filter(Boolean)};
+if(o.type==="tache")o.tache={echeance:f.t_date.value?f.t_date.value+(f.t_heure.value?" "+f.t_heure.value:""):"",criticite:f.t_crit.value,type:f.t_type.value,statut:f.t_statut.value,recurrence:f.t_rec.value};return o};
+// Les champs de tâche ne s'affichent que pour le type « tache ».
+function bindTaskToggle(root){$$("form",root).concat(root.tagName==="FORM"?[root]:[]).forEach((f)=>{if(!f.type||!f.type.options)return;const fs=$("[data-task]",f);if(!fs)return;const upd=()=>fs.style.display=f.type.value==="tache"?"":"none";f.type.addEventListener("change",upd);upd()})}
 
-function memItem(s){return '<div class="item" data-mid="'+s.id+'"><div class="t">'+esc(s.title)+'</div><div class="meta">#'+s.id+" · "+esc(s.kind)+" · modifié "+day(s.updated_at)+(s.source?" · "+esc(s.source):"")+"</div>"+
+const TSTAT={a_faire:"à faire",silencieux:"silencieuse",fait:"faite",annule:"annulée"};
+const frDate=(d)=>d?d.slice(8,10)+"/"+d.slice(5,7)+"/"+d.slice(0,4):"";
+function taskMeta(t){return '<div class="meta">⏰ '+(t.date?esc(frDate(t.date)+(t.heure?" "+t.heure:"")):"sans échéance")+" · "+esc(t.criticite)+" · "+esc(t.type)+" · "+esc(TSTAT[t.statut]||t.statut)+(t.recurrence?" · ↻ "+esc(t.recurrence):"")+(t.synchro?" · 📅 Google":"")+"</div>"}
+function memItem(s){return '<div class="item" data-mid="'+s.id+'"><div class="t">'+esc(s.title)+'</div><div class="meta">#'+s.id+" · "+esc(s.kind)+" · modifié "+day(s.updated_at)+(s.source?" · "+esc(s.source):"")+"</div>"+(s.tache?taskMeta(s.tache):"")+
 (s.tags.length?"<div>"+s.tags.map((t)=>'<span class="tag" data-tag="'+esc(t)+'">'+esc(t)+"</span>").join("")+"</div>":"")+
 "<pre>"+esc(s.content)+'</pre><div class="acts"><button data-a="edit">Modifier</button><button data-a="del" class="d">Supprimer</button></div></div>'}
 
@@ -98,7 +108,7 @@ h+='</section><section class="card"><details><summary>+ Ajouter un souvenir (tex
 '<details><summary>+ Joindre des fichiers</summary><form id="ff"><label>Fichier(s) — '+(MAX/1048576)+' Mo max chacun</label><input type="file" name="fichier" multiple required><label>Description</label><input name="description" placeholder="Facultatif"><div class="acts"><button class="p">Envoyer</button></div><progress max="100" value="0"></progress></form></details></section>'+
 '<section class="card"><h3 style="margin-top:0">Souvenirs ('+j.souvenirs.length+')</h3><div id="mems">'+(j.souvenirs.map(memItem).join("")||'<p class="empty">Aucun souvenir.</p>')+"</div>"+
 "<h3>Fichiers ("+j.fichiers.length+')</h3><div id="files">'+(j.fichiers.map(fileItem).join("")||'<p class="empty">Aucun fichier.</p>')+"</div></section>";
-$("#main").innerHTML=h;const mems=Object.fromEntries(j.souvenirs.map((s)=>[s.id,s])),files=Object.fromEntries(j.fichiers.map((f)=>[f.id,f]));
+$("#main").innerHTML=h;bindTaskToggle($("#main"));const mems=Object.fromEntries(j.souvenirs.map((s)=>[s.id,s])),files=Object.fromEntries(j.fichiers.map((f)=>[f.id,f]));
 if(p){$("#pf").onsubmit=async(e)=>{e.preventDefault();const f=e.target,ng=Number(f.groupe_id.value);
 if(ng!==p.group_id&&!confirm("Déplacer « "+p.name+" » vers "+gpath(ng)+" ?\\nSes souvenirs et fichiers suivent. Les clés qui n'ont pas accès à ce groupe ne le verront plus."))return;
 await api("PATCH","projets/"+p.id,{nom:f.nom.value,statut:f.statut.value,description:f.description.value,groupe_id:ng});toast("Projet enregistré");await loadProjets();reload()};
@@ -117,7 +127,7 @@ bindItems(mems,files,reload)}
 function bindItems(mems,files,reload){
 $$("#main [data-mid]").forEach((el)=>{const s=mems[el.dataset.mid];if(!s)return;
 $('[data-a="edit"]',el)&&($('[data-a="edit"]',el).onclick=()=>{el.innerHTML='<form>'+memForm(s,s.project_id,s.group_id)+'<div class="acts"><button class="p">Enregistrer</button><button type="button" data-a="cancel">Annuler</button></div></form>';
-$("form",el).onsubmit=async(e)=>{e.preventDefault();await api("PATCH","souvenirs/"+s.id,memData(e.target));toast("Souvenir modifié");await loadProjets();reload()};$('[data-a="cancel"]',el).onclick=reload});
+bindTaskToggle(el);$("form",el).onsubmit=async(e)=>{e.preventDefault();await api("PATCH","souvenirs/"+s.id,memData(e.target));toast("Souvenir modifié");await loadProjets();reload()};$('[data-a="cancel"]',el).onclick=reload});
 $('[data-a="del"]',el)&&($('[data-a="del"]',el).onclick=async()=>{if(!confirm("Supprimer définitivement « "+s.title+" » ?"))return;await api("DELETE","souvenirs/"+s.id);toast("Souvenir supprimé");await loadProjets();reload()})});
 $$("#main [data-fid]").forEach((el)=>{const f=files[el.dataset.fid];if(!f)return;
 $('[data-a="fedit"]',el).onclick=()=>{el.innerHTML='<form><div class="row"><div><label>Nom</label><input name="nom" value="'+esc(f.filename)+'"></div><div><label>Projet</label><select name="projet_id">'+projOpts(f.project_id)+'</select></div><div><label>Groupe (si aucun projet)</label><select name="groupe_id">'+groupOpts(f.group_id)+'</select></div></div><label>Description</label><input name="description" value="'+esc(f.description)+'"><div class="acts"><button class="p">Enregistrer</button><button type="button" data-a="cancel">Annuler</button></div></form>';

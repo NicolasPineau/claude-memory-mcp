@@ -176,3 +176,22 @@ describe("migration v5", () => {
     expect((await env.DB.prepare("SELECT COUNT(*) n FROM task_levels").first()).n).toBe(3);
   });
 });
+
+describe("souvenirs de type « tache » hors add_task", () => {
+  it("remember et /admin créent la ligne de tâche ; /admin modifie échéance et criticité", async () => {
+    const out = await call(MASTER, "remember", { titre: "Via remember", contenu: "Via remember", type: "tache" });
+    const id = Number(out.match(/#(\d+)/)[1]);
+    expect(await call(MASTER, "list_tasks")).toMatch(new RegExp(`^#${id} ! Via remember$`, "m"));
+
+    const perso = (await env.DB.prepare("SELECT id FROM groups WHERE name = 'Perso'").first()).id;
+    const r = await admin("POST", "souvenirs", { titre: "Via admin", contenu: "x", type: "tache", groupe_id: perso, tache: { echeance: "2026-12-01 09:30", criticite: "critique", statut: "a_faire" } });
+    expect(r.ok).toBe(true);
+    expect(await admin("PATCH", `souvenirs/${id}`, { tache: { echeance: "2026-12-02", criticite: "basse" } })).toMatchObject({ ok: true });
+    expect(await admin("PATCH", `souvenirs/${id}`, { tache: { echeance: "bientôt" } })).toMatchObject({ status: 400 });
+    const list = await call(MASTER, "list_tasks", { detail: true });
+    expect(list).toMatch(new RegExp(`#${r.id} !! Via admin — 01/12 9h30 · critique`));
+    expect(list).toMatch(new RegExp(`#${id} Via remember — 02/12 · basse`));
+    const view = await admin("GET", `projets/0?groupe=${perso}`);
+    expect(view.souvenirs.find((s) => s.id === r.id).tache).toMatchObject({ statut: "a_faire", date: "2026-12-01", heure: "09:30", criticite: "critique", type: "Tâche" });
+  });
+});

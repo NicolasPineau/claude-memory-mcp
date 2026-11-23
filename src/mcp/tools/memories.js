@@ -1,4 +1,5 @@
 import { deleteMemory, ftsQuery, memoryTags, reindex, setTags, summary, syncMemoryFiles, touchProject } from "../../db/memories.js";
+import { ensureTaskRow } from "../../db/tasks.js";
 import { readOnlyError, resolvePlacement } from "../placement.js";
 import { DE, RO, WR, groupeArg, int, str, strList } from "../tool-helpers.js";
 import { day, normTags, now } from "../../util.js";
@@ -43,7 +44,7 @@ export const MEMORIES_TOOLS = {
   },
 
   remember: {
-    description: "Enregistre un nouveau souvenir. À n'appeler qu'une fois en fin de conversation, après accord explicite de l'utilisateur. `contenu` doit être autonome et compréhensible plus tard. `projet` : nom du projet ; s'il n'existe pas, il est créé dans `groupe` (obligatoire dans ce cas). Sans projet, le souvenir va dans `groupe`, sinon dans le groupe par défaut du connecteur. `tags` : thèmes libres (ex. [\"bricolage\"]). `type` : note | decision | fait | idee | resume | tache | evenement. `source` : d'où ça vient (ex. « compte perso, mobile »).",
+    description: "Enregistre un nouveau souvenir. À n'appeler qu'une fois en fin de conversation, après accord explicite de l'utilisateur. `contenu` doit être autonome et compréhensible plus tard. `projet` : nom du projet ; s'il n'existe pas, il est créé dans `groupe` (obligatoire dans ce cas). Sans projet, le souvenir va dans `groupe`, sinon dans le groupe par défaut du connecteur. `tags` : thèmes libres (ex. [\"bricolage\"]). `type` : note | decision | fait | idee | resume | tache | evenement (pour une tâche avec échéance, préfère add_task). `source` : d'où ça vient (ex. « compte perso, mobile »).",
     annotations: WR,
     inputSchema: { type: "object", required: ["titre", "contenu"], properties: { titre: str("Titre court"), contenu: str("Texte du souvenir"), projet: str("Projet"), groupe: groupeArg(), tags: strList("Tags"), type: str("Type de souvenir"), source: str("Origine") } },
     async run(db, a, { acl }) {
@@ -59,6 +60,7 @@ export const MEMORIES_TOOLS = {
       await setTags(db, id, tags);
       await reindex(db, id);
       await touchProject(db, pid);
+      await ensureTaskRow(db, id);
       return `Souvenir #${id} enregistré.` + (pid ? ` Projet : ${place.projectName}${place.created ? " (créé)" : ""}.` : "") +
         ` Groupe : ${acl.tree.path(place.groupId)}.` + (tags.length ? ` Tags : ${tags.join(", ")}.` : "");
     },
@@ -122,6 +124,7 @@ export const MEMORIES_TOOLS = {
       }
       await reindex(db, r.id);
       await touchProject(db, pid);
+      await ensureTaskRow(db, r.id);
       return `Souvenir #${r.id} mis à jour.`;
     },
   },
