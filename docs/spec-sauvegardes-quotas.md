@@ -1,6 +1,6 @@
 # Feat 2 — Sauvegardes automatiques et garde-fous de consommation
 
-Statut : brouillon, à valider en interview. Cible : v3.0.0.
+Statut : spec arrêtée le 23/11/2026, à implémenter. Cible : v3.0.0.
 
 ## 1. Besoin
 
@@ -87,10 +87,21 @@ Consommation du jour et du mois pour chaque métrique : valeur, seuil, limite r�
 - [ ] Une sauvegarde qui ferait dépasser un seuil R2 n'est pas envoyée.
 - [ ] Une sauvegarde restaurée sur une base vide redonne les mêmes données (test de restauration).
 
-## 6. Questions ouvertes
+## 6. Décisions
 
-1. Comptage : compteurs maison (A) ou API Analytics du compte (B) ?
-2. Export : GitHub Actions (A) ou Cron Trigger du Worker (B) ?
-3. Seuils à 50 % des limites gratuites : trop prudent, ou pas assez ?
-4. Une fois un seuil atteint, faut-il quand même laisser passer les lectures (`recall`, `read_memory`) jusqu'à la vraie limite, et ne bloquer que les écritures ?
-5. Veux-tu une alerte par e-mail quand un seuil est atteint ?
+| Question | Choix | Pourquoi |
+|---|---|---|
+| Comptage | **B. API Analytics de Cloudflare**, avec la consommation du compte mise en cache 5 minutes dans D1 (une écriture toutes les 5 min, soit environ 300 par jour) | Chiffres exacts et valables pour tout le compte, autres Workers compris. Les compteurs maison ne verraient que ce Worker, et chaque requête coûterait une écriture D1. Le décalage de quelques minutes est couvert par la marge de 50 %. |
+| Si l'API Analytics ne répond pas | Le connecteur continue de servir (on garde les derniers chiffres connus, avec un avertissement dans `/admin`). La sauvegarde, elle, est annulée. | Une panne de l'API ne doit pas couper la mémoire. En revanche, rien ne s'écrit dans R2, le seul service facturable, sans chiffres fiables. |
+| Export | **A. GitHub Actions** (`wrangler d1 export`, puis envoi dans R2) | Pas de limite de 10 ms de CPU, aucun code d'export à maintenir, gratuit pour un dépôt public. Le workflow ne journalise que des tailles et des noms de fichiers, jamais le contenu. |
+| Rétention | **Règle de cycle de vie R2** : suppression automatique après 60 jours | Plus simple et plus sûr qu'un code de nettoyage. La suppression est gratuite. |
+| Seuils | **50 % des limites gratuites** | Marge confortable si les offres gratuites baissent. Réglables à tout moment. |
+| Comportement au seuil | **Tout est refusé** (lectures et écritures) jusqu'à la remise à zéro de la période | C'est la consigne : on compte tout et on refuse dès qu'un seuil est atteint. |
+| Alertes | Bandeau dans `/admin` à 80 % et à 100 % du seuil, et ligne d'avertissement dans les réponses MCP à 80 %. Pas d'e-mail maison. | Cloudflare envoie déjà un e-mail quand une limite D1 est atteinte. Inutile d'ajouter un service d'envoi. |
+
+## 7. Prérequis côté Cloudflare (à faire par l'utilisateur)
+
+1. Activer R2 et créer le bucket privé `memoire-sauvegardes`, avec une règle de cycle de vie « supprimer après 60 jours ».
+2. Créer deux jetons d'API :
+   - lecture seule Analytics (compte) : secret `CF_API_TOKEN` du Worker ;
+   - D1 (lecture et export) et R2 (écriture sur le bucket) : secret `CLOUDFLARE_API_TOKEN` du dépôt GitHub, utilisé par le workflow.
