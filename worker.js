@@ -19,10 +19,10 @@ const DL_TTL_MS = 60 * 60 * 1000; // lien de téléchargement : 1 h
 const UP_TTL_MS = 10 * 60 * 1000; // lien d'envoi : 10 min
 
 const INSTRUCTIONS = `Ce connecteur est la mémoire à long terme de l'utilisateur, partagée entre tous ses comptes, appareils et conversations. Utilise-le comme le ferait une personne qui se souvient.
-1. Au début de la conversation SEULEMENT : appelle une fois \`lister_projets\` avec \`noms_seulement: true\` (noms des projets et des tags, très court). Si, d'après ces seuls noms, la demande de l'utilisateur semble liée à un projet ou un thème existant, charge-le avec \`contexte_projet\` (ou \`rappeler\` pour un tag). Sinon, n'insiste pas. Ensuite, ne consulte plus la mémoire de ta propre initiative pendant la conversation : seulement si l'utilisateur le demande (« regarde dans ta mémoire », « tu te souviens… », « on reprend le projet X »).
-2. N'enregistre rien en cours de conversation. Une seule fois, à la fin (quand l'utilisateur dit « merci », « au revoir », « c'est tout », « on a fini » ou conclut autrement), si l'échange a produit quelque chose qui mérite d'être retenu (décisions, avancement d'un projet, faits utiles, idées), propose en une phrase d'en garder un résumé (ex. « Je garde un résumé de cette session dans ta mémoire ? ») et n'appelle \`memoriser\` qu'après son accord. Écris un souvenir autonome (compréhensible sans la conversation), avec un titre clair, un projet si pertinent et des tags thématiques (ex. bricolage, scoutisme).
-3. À ce même moment, si l'échange est conséquent et qu'aucun projet n'a été identifié au début, propose de créer un projet (nom + courte description) avec \`definir_projet\` et d'y rattacher le résumé. Si un souvenir existant devient faux ou incomplet, propose de le mettre à jour (\`modifier_souvenir\`) plutôt que d'en créer un doublon.
-4. Les fichiers importants peuvent être conservés avec \`joindre_fichier\` (petits textes). Pour un fichier binaire ou volumineux, n'envoie pas son contenu : utilise \`preparer_upload\` (lien d'envoi pour curl) ou propose à l'utilisateur son interface d'administration (/admin), où il peut envoyer des fichiers. \`lire_fichier\` renvoie par défaut un lien de téléchargement. \`supprimer_fichier\` efface un fichier (demande confirmation à l'utilisateur avant).
+1. Au début de la conversation SEULEMENT : appelle une fois \`list_projects\` avec \`noms_seulement: true\` (noms des projets et des tags, très court). Si, d'après ces seuls noms, la demande de l'utilisateur semble liée à un projet ou un thème existant, charge-le avec \`project_context\` (ou \`recall\` pour un tag). Sinon, n'insiste pas. Ensuite, ne consulte plus la mémoire de ta propre initiative pendant la conversation : seulement si l'utilisateur le demande (« regarde dans ta mémoire », « tu te souviens… », « on reprend le projet X »).
+2. N'enregistre rien en cours de conversation. Une seule fois, à la fin (quand l'utilisateur dit « merci », « au revoir », « c'est tout », « on a fini » ou conclut autrement), si l'échange a produit quelque chose qui mérite d'être retenu (décisions, avancement d'un projet, faits utiles, idées), propose en une phrase d'en garder un résumé (ex. « Je garde un résumé de cette session dans ta mémoire ? ») et n'appelle \`remember\` qu'après son accord. Écris un souvenir autonome (compréhensible sans la conversation), avec un titre clair, un projet si pertinent et des tags thématiques (ex. bricolage, scoutisme).
+3. À ce même moment, si l'échange est conséquent et qu'aucun projet n'a été identifié au début, propose de créer un projet (nom + courte description) avec \`set_project\` et d'y rattacher le résumé. Si un souvenir existant devient faux ou incomplet, propose de le mettre à jour (\`update_memory\`) plutôt que d'en créer un doublon.
+4. Les fichiers importants peuvent être conservés avec \`attach_file\` (petits textes). Pour un fichier binaire ou volumineux, n'envoie pas son contenu : utilise \`prepare_upload\` (lien d'envoi pour curl) ou propose à l'utilisateur son interface d'administration (/admin), où il peut envoyer des fichiers. \`read_file\` renvoie par défaut un lien de téléchargement. \`delete_file\` efface un fichier (demande confirmation à l'utilisateur avant).
 Ne stocke jamais de mots de passe ou secrets.`;
 
 // ------------------------------------------------------------------ schéma
@@ -237,8 +237,8 @@ const int = (description) => ({ type: "integer", description });
 const strList = (description) => ({ type: "array", items: { type: "string" }, description });
 
 const TOOLS = {
-  rappeler: {
-    description: "Cherche dans la mémoire. `requete` = mots-clés ou phrase libre (ex. « après-midi zoo »). Filtres optionnels : `projet` (nom) et `tags` (tous requis). Requête vide = derniers souvenirs. Renvoie des extraits ; utilise `lire_souvenir` pour le texte complet.",
+  recall: {
+    description: "Cherche dans la mémoire. `requete` = mots-clés ou phrase libre (ex. « après-midi zoo »). Filtres optionnels : `projet` (nom) et `tags` (tous requis). Requête vide = derniers souvenirs. Renvoie des extraits ; utilise `read_memory` pour le texte complet.",
     annotations: RO,
     inputSchema: { type: "object", properties: { requete: str("Mots-clés ou phrase"), projet: str("Nom du projet"), tags: strList("Tags requis"), limite: int("Nombre max (défaut 10, max 50)") } },
     async run(db, a) {
@@ -262,14 +262,14 @@ const TOOLS = {
         let sql = base + (where.length ? "WHERE " + where.join(" AND ") + " " : "") + "ORDER BY m.updated_at DESC LIMIT ?";
         rows = (await db.prepare(sql).bind(...params, limite).all()).results;
       }
-      if (!rows.length) return "Aucun souvenir trouvé. Essaie d'autres mots-clés, ou `lister_projets` / `lister_tags`.";
+      if (!rows.length) return "Aucun souvenir trouvé. Essaie d'autres mots-clés, ou `list_projects` / `list_tags`.";
       const parts = [];
       for (const r of rows) parts.push(await summary(db, r));
       return `${rows.length} souvenir(s) :\n\n` + parts.join("\n\n");
     },
   },
 
-  memoriser: {
+  remember: {
     description: "Enregistre un nouveau souvenir. À n'appeler qu'une fois en fin de conversation, après accord explicite de l'utilisateur. `contenu` doit être autonome et compréhensible plus tard. `projet` : nom du projet (créé s'il n'existe pas). `tags` : thèmes libres (ex. [\"bricolage\"]). `type` : note | decision | fait | idee | resume | tache | evenement. `source` : d'où ça vient (ex. « compte perso, mobile »).",
     annotations: WR,
     inputSchema: { type: "object", required: ["titre", "contenu"], properties: { titre: str("Titre court"), contenu: str("Texte du souvenir"), projet: str("Projet"), tags: strList("Tags"), type: str("Type de souvenir"), source: str("Origine") } },
@@ -288,7 +288,7 @@ const TOOLS = {
     },
   },
 
-  lire_souvenir: {
+  read_memory: {
     description: "Lit un souvenir en entier (avec ses tags et fichiers joints).",
     annotations: RO,
     inputSchema: { type: "object", required: ["id"], properties: { id: int("Numéro du souvenir") } },
@@ -307,7 +307,7 @@ const TOOLS = {
     },
   },
 
-  modifier_souvenir: {
+  update_memory: {
     description: "Met à jour un souvenir. Seuls les champs fournis changent. `contenu` remplace le texte ; `ajouter_au_contenu` ajoute un paragraphe daté à la fin. `tags` remplace tous les tags ; `ajouter_tags` en ajoute. `projet=\"\"` retire du projet.",
     annotations: WR,
     inputSchema: { type: "object", required: ["id"], properties: { id: int("Numéro"), titre: str("Nouveau titre"), contenu: str("Nouveau contenu"), ajouter_au_contenu: str("Texte à ajouter"), projet: str("Projet"), tags: strList("Remplace les tags"), ajouter_tags: strList("Tags à ajouter"), type: str("Type") } },
@@ -330,7 +330,7 @@ const TOOLS = {
     },
   },
 
-  oublier: {
+  forget: {
     description: "Supprime définitivement un souvenir (les fichiers joints restent, détachés).",
     annotations: DE,
     inputSchema: { type: "object", required: ["id"], properties: { id: int("Numéro") } },
@@ -339,7 +339,7 @@ const TOOLS = {
     },
   },
 
-  lister_projets: {
+  list_projects: {
     description: "Liste les projets (nom, statut, description, nombre de souvenirs, dernière activité). Avec `noms_seulement: true`, renvoie seulement les noms des projets actifs et des tags (réponse très courte, à utiliser en début de conversation).",
     annotations: RO,
     inputSchema: { type: "object", properties: { noms_seulement: { type: "boolean", description: "Ne renvoyer que les noms des projets et des tags" }, inclure_archives: { type: "boolean", description: "Inclure les projets archivés" } } },
@@ -358,7 +358,7 @@ const TOOLS = {
     },
   },
 
-  definir_projet: {
+  set_project: {
     description: "Crée ou met à jour un projet. `description` = résumé vivant du projet (objectif, état, prochaines étapes) : garde-le à jour, c'est ce qui est lu en premier. `statut` : actif | en pause | termine | archive.",
     annotations: WR,
     inputSchema: { type: "object", required: ["nom"], properties: { nom: str("Nom du projet"), description: str("Résumé"), statut: str("Statut"), nouveau_nom: str("Renommer") } },
@@ -377,7 +377,7 @@ const TOOLS = {
     },
   },
 
-  contexte_projet: {
+  project_context: {
     description: "Charge tout le contexte d'un projet : description, tags fréquents, fichiers et derniers souvenirs. À appeler quand l'utilisateur reprend un projet.",
     annotations: RO,
     inputSchema: { type: "object", required: ["nom"], properties: { nom: str("Nom du projet"), nb_souvenirs: int("Nombre de souvenirs (défaut 15)") } },
@@ -392,7 +392,7 @@ const TOOLS = {
       const mems = (await db.prepare("SELECT m.*, ? AS project FROM memories m WHERE project_id = ? ORDER BY updated_at DESC LIMIT ?").bind(p.name, p.id, n).all()).results;
       const tags = (await db.prepare("SELECT t.name, COUNT(*) n FROM tags t JOIN memory_tags mt ON mt.tag_id=t.id JOIN memories m ON m.id = mt.memory_id WHERE m.project_id = ? GROUP BY t.id ORDER BY n DESC LIMIT 15").bind(p.id).all()).results;
       const files = (await db.prepare("SELECT f.id, f.filename, f.size, f.description FROM files f LEFT JOIN memories m ON m.id = f.memory_id WHERE f.project_id = ? OR m.project_id = ? ORDER BY f.created_at DESC").bind(p.id, p.id).all()).results;
-      const out = [`# Projet : ${p.name}  [${p.status}]`, `Créé ${day(p.created_at)}, dernière activité ${day(p.updated_at)}`, "", p.description || "(pas encore de description — pense à `definir_projet`)"];
+      const out = [`# Projet : ${p.name}  [${p.status}]`, `Créé ${day(p.created_at)}, dernière activité ${day(p.updated_at)}`, "", p.description || "(pas encore de description — pense à `set_project`)"];
       if (tags.length) out.push("", "Tags : " + tags.map((t) => `${t.name} (${t.n})`).join(", "));
       if (files.length) out.push("", "Fichiers :", ...files.map((f) => `- ${f.filename} (${f.size} o) id=${f.id} ${f.description}`));
       out.push("", `Derniers souvenirs (${mems.length}) :`, "");
@@ -402,7 +402,7 @@ const TOOLS = {
     },
   },
 
-  lister_tags: {
+  list_tags: {
     description: "Liste tous les tags avec leur nombre d'utilisations.",
     annotations: RO,
     inputSchema: { type: "object", properties: {} },
@@ -412,8 +412,8 @@ const TOOLS = {
     },
   },
 
-  joindre_fichier: {
-    description: "Conserve un petit fichier dans la mémoire en passant son contenu : `contenu_texte` (texte, code, markdown, csv…) ou `contenu_base64`. Pour un fichier binaire ou volumineux, préfère `preparer_upload` (le contenu ne passe pas par la conversation). Rattache-le à un `souvenir_id` et/ou un `projet`.",
+  attach_file: {
+    description: "Conserve un petit fichier dans la mémoire en passant son contenu : `contenu_texte` (texte, code, markdown, csv…) ou `contenu_base64`. Pour un fichier binaire ou volumineux, préfère `prepare_upload` (le contenu ne passe pas par la conversation). Rattache-le à un `souvenir_id` et/ou un `projet`.",
     annotations: WR,
     inputSchema: { type: "object", required: ["nom_fichier"], properties: { nom_fichier: str("Nom du fichier"), contenu_texte: str("Contenu texte"), contenu_base64: str("Contenu binaire en base64"), description: str("Description"), souvenir_id: int("Souvenir lié"), projet: str("Projet lié") } },
     async run(db, a) {
@@ -437,7 +437,7 @@ const TOOLS = {
     },
   },
 
-  preparer_upload: {
+  prepare_upload: {
     description: "Prépare un lien d'envoi à usage unique (valable 10 min) pour stocker un fichier SANS faire passer son contenu par la conversation. Envoie ensuite le fichier avec la commande renvoyée (`curl -T <fichier> <url>`), depuis une machine qui peut joindre le serveur. Max 20 Mo.",
     annotations: WR,
     inputSchema: { type: "object", required: ["nom_fichier"], properties: { nom_fichier: str("Nom du fichier"), description: str("Description"), souvenir_id: int("Souvenir lié"), projet: str("Projet lié") } },
@@ -451,7 +451,7 @@ const TOOLS = {
     },
   },
 
-  lire_fichier: {
+  read_file: {
     description: "Récupère un fichier joint. Par défaut (`mode`=\"lien\") renvoie ses infos et un lien de téléchargement valable 1 h, sans le contenu. `mode`=\"contenu\" renvoie le contenu (texte en clair, sinon base64) : à réserver aux petits fichiers texte à lire.",
     annotations: RO,
     inputSchema: { type: "object", required: ["id"], properties: { id: str("Identifiant du fichier"), mode: { type: "string", enum: ["lien", "contenu"], description: "lien (défaut) ou contenu" } } },
@@ -475,17 +475,17 @@ const TOOLS = {
     },
   },
 
-  supprimer_fichier: {
+  delete_file: {
     description: "Supprime définitivement un fichier conservé (son contenu et ses liens de téléchargement). Irréversible : demande confirmation à l'utilisateur avant. Les souvenirs liés ne sont pas touchés.",
     annotations: DE,
-    inputSchema: { type: "object", required: ["id"], properties: { id: str("Identifiant du fichier (voir lister_fichiers)") } },
+    inputSchema: { type: "object", required: ["id"], properties: { id: str("Identifiant du fichier (voir list_files)") } },
     async run(db, a) {
       const f = await deleteFile(db, String(a.id || "").trim());
       return f ? `Fichier « ${f.filename} » (id=${f.id}) supprimé.` : `Fichier ${a.id} introuvable.`;
     },
   },
 
-  lister_fichiers: {
+  list_files: {
     description: "Liste les fichiers conservés (optionnellement ceux d'un projet).",
     annotations: RO,
     inputSchema: { type: "object", properties: { projet: str("Projet") } },
