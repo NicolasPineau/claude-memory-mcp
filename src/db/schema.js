@@ -18,6 +18,8 @@ export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS api_keys (id INTEGER PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE, default_group_id INTEGER NOT NULL REFERENCES groups(id), created_at TEXT NOT NULL, last_used_at TEXT, revoked_at TEXT)`,
   `CREATE TABLE IF NOT EXISTS api_key_rules (key_id INTEGER NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE, group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE, access TEXT NOT NULL CHECK (access IN ('rw', 'ro', 'none')), PRIMARY KEY (key_id, group_id))`,
   `CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+  // Copies de fichiers orphelines dans le bucket de sauvegarde, depuis quand (scripts/lib/prune.js).
+  `CREATE TABLE IF NOT EXISTS backup_orphans (id TEXT PRIMARY KEY, since INTEGER NOT NULL)`,
   // Cache de la consommation du compte (garde-fous, voir src/quota/).
   `CREATE TABLE IF NOT EXISTS usage_cache (metric TEXT PRIMARY KEY, value REAL NOT NULL, period TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL)`,
 ];

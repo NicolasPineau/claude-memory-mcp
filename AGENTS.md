@@ -23,6 +23,7 @@ Serveur MCP « mémoire partagée » pour Claude : Cloudflare Worker (JavaScript
 | `src/quota/analytics.js` | Lecture de la consommation du compte (API GraphQL Analytics), sans dépendance : partagé avec le script de sauvegarde |
 | `src/quota/guard.js` | Cache de la consommation (`usage_cache`), évaluation des seuils, messages de refus et lignes « ⚠️ Quota » |
 | `scripts/backup.mjs` | Sauvegarde : export D1 (schéma puis données, sans la table FTS), reconstruction des index, envoi dans R2 (`db/`), copie des nouveaux fichiers (`files/`) |
+| `scripts/lib/prune.js` | Nettoyage des copies de fichiers supprimés dans le bucket de sauvegarde (fonction pure, table `backup_orphans`) |
 | `scripts/migrate-files-to-r2.mjs` | Migration ponctuelle du contenu des fichiers de D1 vers R2 (lancée par `.github/workflows/migrate-files.yml`) |
 | `.github/workflows/backup.yml` | Lance la sauvegarde chaque dimanche à 02:00 UTC |
 | `src/admin/` | `/admin` : `index.js` (routage), `api.js` (API JSON), `page.js` (interface HTML) |
