@@ -1,5 +1,5 @@
 import { Acl, defaultRootGroupId, effectiveRights, loadGroups } from "../db/groups.js";
-import { now, randomToken, timingSafeEqual } from "../util.js";
+import { now, timingSafeEqual } from "../util.js";
 
 // ------------------------------------------------------------------ clés d'accès au connecteur MCP
 export async function sha256hex(s) {
@@ -7,8 +7,11 @@ export async function sha256hex(s) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// Nouvelle clé : 32 octets aléatoires en base64url (43 caractères). Seul son hash est stocké.
-export const generateKey = randomToken;
+// Nouvelle clé : 32 octets aléatoires en hexadécimal (64 caractères [0-9a-f]), même alphabet que MEMORY_SECRET.
+// Claude n'a pas réussi à connecter des URL contenant une clé base64url (majuscules, « - », « _ »). Seul le hash est stocké.
+export function generateKey() {
+  return [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 export const masterKeyEnabled = (env) => String(env.MASTER_KEY_ENABLED ?? "true").toLowerCase() !== "false";
 

@@ -121,6 +121,7 @@ describe("clés", () => {
     expect((await admin("POST", "cles", { nom: "x", groupe_defaut_id: g.pro, regles: { [g.perso]: "rw" } })).erreur).toMatch(/groupe par défaut doit être en lecture-écriture/);
     const r = await admin("POST", "cles", { nom: "Claude pro 2", groupe_defaut_id: g.pro, regles: { [g.pro]: "rw" } });
     expect(r.url).toBe(`https://memory.test/${r.cle}/mcp`);
+    expect(r.cle).toMatch(/^[0-9a-f]{64}$/);
     expect(await call(r.cle, "list_projects", { noms_seulement: true })).toBe("Pro : Client X\nTags : boulot");
     const liste = await admin("GET", "cles");
     expect(JSON.stringify(liste)).not.toContain(r.cle);
