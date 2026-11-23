@@ -53,7 +53,7 @@ Périmètre validé avec l'utilisateur lors d'une interview. Priorité : les rap
 
 ### Rendez-vous ↔ Google Agenda
 
-- Synchro **bidirectionnelle côté serveur** (OAuth Google sur le Worker, jeton de rafraîchissement en secret) avec un agenda dédié que l'utilisateur va créer.
+- Synchro **bidirectionnelle côté serveur** (OAuth Google sur le Worker, voir « Décisions du lot 3 ») avec un agenda dédié que l'utilisateur va créer.
 - RDV supprimé dans Google → statut `annule` dans Memory (historique conservé, ne remonte plus).
 - Les RDV ont aussi une criticité et les alertes ntfy correspondantes (les rappels Google peuvent rester actifs en plus).
 
