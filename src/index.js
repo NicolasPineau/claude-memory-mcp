@@ -99,10 +99,10 @@ export default {
     if (!env.DB) return;
     ctx.waitUntil((async () => {
       await ensureSchema(env.DB);
-      if ((await checkQuota(env.DB, env)).blocked.length) return;
+      if ((await checkQuota(env.DB, env)).blocked.length) { console.log("Cron : quota atteint, rien n'est fait"); return; }
       const at = new Date(controller.scheduledTime);
-      await syncGoogle(env.DB, env, { at });
-      await runAlerts(env.DB, env, { at });
+      console.log("synchro Google :", JSON.stringify(await syncGoogle(env.DB, env, { at })));
+      console.log(`alertes : ${await runAlerts(env.DB, env, { at })} envoyée(s)`);
     })());
   },
 };

@@ -67,27 +67,34 @@ export async function sendNtfy(env, msg) {
   const headers = { "Content-Type": "application/json" };
   if (env.NTFY_TOKEN) headers.Authorization = `Bearer ${env.NTFY_TOKEN}`;
   const res = await fetch(String(env.NTFY_URL || "https://ntfy.sh").replace(/\/+$/, "") + "/", { method: "POST", headers, body: JSON.stringify(msg) });
+  if (!res.ok) console.log(`alertes : ntfy a répondu ${res.status} ${(await res.text().catch(() => "")).slice(0, 200)}`);
   return res.ok;
 }
 
 // Envoie les alertes dues. Une tâche alerte quand son échéance est passée, dans la plage de son niveau, puis est relancée
 // toutes les `repeat_minutes` (0 = jamais) tant qu'elle n'est ni « Vu », ni faite, ni repoussée. Renvoie le nombre envoyé.
 export async function runAlerts(db, env, { at = new Date(), send = sendNtfy } = {}) {
-  if (!env.NTFY_TOPIC) return 0;
+  if (!env.NTFY_TOPIC) { console.log("alertes : secret NTFY_TOPIC absent, rien n'est envoyé"); return 0; }
   const p = parisNow(at), nowKey = `${p.date} ${p.time}`;
   const morning = await getSetting(db, "alerte_matin");
   const rows = (await db.prepare(`${TASK_SELECT} WHERE t.status = 'a_faire' AND l.alert != 'aucune' AND t.due_date IS NOT NULL
     AND t.due_date <= ? AND t.alert_ack = 0 AND (t.alert_last IS NULL OR l.repeat_minutes > 0)
     ORDER BY l.position, t.due_date, COALESCE(t.due_time, '')`).bind(p.date).all()).results;
   let sent = 0;
+  // Journal (onglet Logs du Worker) : pas le nom du topic, seulement sa longueur et ses 7 premiers caractères.
+  console.log(`alertes ${nowKey} (Paris) : ${rows.length} candidate(s), topic ${String(env.NTFY_TOPIC).slice(0, 7)}… (${String(env.NTFY_TOPIC).length} car.), liens ${env.PUBLIC_URL ? "oui" : "non"}`);
   for (const t of rows) {
     if (sent >= MAX_PER_RUN) break;
-    if (dueKey(t, morning) > nowKey || !inWindow(p.time, t.alert_from, t.alert_to)) continue;
+    if (dueKey(t, morning) > nowKey || !inWindow(p.time, t.alert_from, t.alert_to)) {
+      console.log(`alertes : #${t.memory_id} pas encore (échéance ${dueKey(t, morning)}, plage ${t.alert_from}–${t.alert_to})`);
+      continue;
+    }
     // Tolérance d'une minute : le Cron ne tombe pas à la seconde près.
     if (t.alert_last && at.getTime() - Date.parse(t.alert_last) < t.repeat_minutes * 60_000 - 60_000) continue;
     let ok = false;
     try { ok = await send(env, ntfyMessage(env, t, p.date, await signTaskLink(env, t.memory_id, at.getTime()))); }
-    catch { ok = false; }
+    catch (e) { console.log(`alertes : envoi de #${t.memory_id} en échec : ${e.message}`); ok = false; }
+    console.log(`alertes : #${t.memory_id} ${ok ? "envoyée" : "non envoyée"}`);
     if (!ok) continue; // réessayé au prochain passage
     await db.prepare("UPDATE tasks SET alert_last = ? WHERE memory_id = ?").bind(new Date(at).toISOString().slice(0, 19) + "Z", t.memory_id).run();
     sent++;
