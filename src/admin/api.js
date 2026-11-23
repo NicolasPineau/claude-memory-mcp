@@ -4,6 +4,7 @@ import { ACCESS, MAX_DEPTH, effectiveRights, loadGroups } from "../db/groups.js"
 import { deleteMemory, ftsQuery, moveProject, reindex, reindexProject, setTags, syncMemoryFiles, touchProject } from "../db/memories.js";
 import { deleteFile, storeFile } from "../files/storage.js";
 import { ALERTS, DEFAULT_SETTINGS, getSetting, parseReports } from "../db/tasks.js";
+import { getSync, googleConfigured, listCalendars, setSync, syncGoogle } from "../google/calendar.js";
 import { cleanName, guessMime, jsonOk, normTags, now } from "../util.js";
 
 export const likeArg = (q) => `%${q.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
@@ -302,6 +303,50 @@ export async function adminApi(request, db, path, url, env = {}, quota = null) {
       set("reports", r.list.map((x) => `${x.label}=${x.rule}`).join("\n"));
     }
     if (stmts.length) await db.batch(stmts);
+    return jsonOk({ ok: true });
+  }
+
+  // --- Google Agenda (synchro des rendez-vous)
+  if (res === "google" && !id && m === "GET") {
+    const g = await getSync(db);
+    return jsonOk({ configure: googleConfigured(env), connecte: !!g.refresh_token, agenda_id: g.calendar_id, agenda_nom: g.calendar_name, groupe_id: g.group_id, projet_id: g.project_id,
+      niveau_id: g.level_id, duree_minutes: g.duration_minutes, derniere_synchro: g.last_sync, erreur: g.last_error });
+  }
+  if (res === "google" && id === "agendas" && m === "GET") {
+    const g = await getSync(db);
+    if (!g.refresh_token) throw new ApiError(409, "Google n'est pas connecté.");
+    try { return jsonOk({ agendas: await listCalendars(env, g.refresh_token) }); }
+    catch (e) { throw new ApiError(502, e.message); }
+  }
+  if (res === "google" && !id && m === "PATCH") {
+    const b = await readJson(request), g = await getSync(db), f = {};
+    if ("groupe_id" in b) f.group_id = await groupIdFrom(db, b.groupe_id, false);
+    if ("projet_id" in b) f.project_id = (await projectFrom(db, b.projet_id))?.id ?? null;
+    if ("niveau_id" in b) {
+      f.level_id = b.niveau_id ? Number(b.niveau_id) : null;
+      if (f.level_id && !(await db.prepare("SELECT 1 FROM task_levels WHERE id = ?").bind(f.level_id).first())) throw new ApiError(404, "Niveau introuvable.");
+    }
+    if (b.duree_minutes != null) f.duration_minutes = intIn(b.duree_minutes, 5, 1440, "Durée");
+    const stmts = [];
+    if (b.agenda_id != null && String(b.agenda_id) !== (g.calendar_id || "")) {
+      // Nouvel agenda : synchro repartie de zéro, les rendez-vous ouverts y seront recréés.
+      f.calendar_id = String(b.agenda_id) || null;
+      f.calendar_name = String(b.agenda_nom || "");
+      f.sync_token = null;
+      stmts.push(db.prepare("UPDATE tasks SET gcal_event_id = NULL, gcal_updated = NULL, gcal_dirty = CASE WHEN status IN ('a_faire', 'silencieux') AND due_date IS NOT NULL AND type_id IN (SELECT id FROM task_types WHERE sync = 'google') THEN 1 ELSE 0 END"));
+      stmts.push(db.prepare("DELETE FROM gcal_trash"));
+    }
+    if (Object.keys(f).length) await setSync(db, f);
+    if (stmts.length) await db.batch(stmts);
+    return jsonOk({ ok: true });
+  }
+  if (res === "google" && id === "synchro" && m === "POST") {
+    const r = await syncGoogle(db, env);
+    if (r.error || r.skipped) throw new ApiError(r.error ? 502 : 409, r.error || `Synchro impossible : ${r.skipped}.`);
+    return jsonOk({ ok: true, ...r });
+  }
+  if (res === "google" && !id && m === "DELETE") {
+    await setSync(db, { refresh_token: null, sync_token: null, last_error: null });
     return jsonOk({ ok: true });
   }
 

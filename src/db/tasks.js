@@ -105,7 +105,7 @@ export function taskLine(t, today, { defaultTypeId = null, detail = false } = {}
 }
 
 export const TASK_SELECT = `SELECT t.*, t.memory_id AS id, m.title, m.content, m.group_id, m.project_id, p.name AS project,
-  l.name AS level, l.marker, l.position AS level_pos, l.horizon_days, l.alert, l.alert_from, l.alert_to, l.repeat_minutes, ty.name AS type
+  l.name AS level, l.marker, l.position AS level_pos, l.horizon_days, l.alert, l.alert_from, l.alert_to, l.repeat_minutes, ty.name AS type, ty.sync AS type_sync
   FROM tasks t JOIN memories m ON m.id = t.memory_id LEFT JOIN projects p ON p.id = m.project_id
   JOIN task_levels l ON l.id = t.level_id JOIN task_types ty ON ty.id = t.type_id`;
 
@@ -184,15 +184,16 @@ async function createNextOccurrence(db, t) {
   const r = await db.prepare("INSERT INTO memories(title, content, kind, project_id, group_id, source, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)")
     .bind(m.title, m.content, m.kind, m.project_id, m.group_id, m.source, ts, ts).run();
   const id = r.meta.last_row_id;
-  await db.prepare("INSERT INTO tasks(memory_id, type_id, level_id, status, due_date, due_time, recur_every, recur_unit, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
-    .bind(id, t.type_id, t.level_id, "a_faire", due, t.due_time, t.recur_every, t.recur_unit, ts, ts).run();
+  await db.prepare("INSERT INTO tasks(memory_id, type_id, level_id, status, due_date, due_time, recur_every, recur_unit, gcal_dirty, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,(SELECT sync = 'google' FROM task_types WHERE id = ?),?,?)")
+    .bind(id, t.type_id, t.level_id, "a_faire", due, t.due_time, t.recur_every, t.recur_unit, t.type_id, ts, ts).run();
   await setTags(db, id, await memoryTags(db, t.memory_id));
   await reindex(db, id);
   return { id, due };
 }
 
-// Applique une modification à la tâche `t` (ligne de TASK_SELECT). `a` : champs de update_task, plus `vu` (accusé de réception).
-// Un changement d'échéance ou de statut réarme les alertes. Renvoie { error } ou { next } (occurrence suivante créée).
+// Applique une modification à la tâche `t` (ligne de TASK_SELECT). `a` : champs de update_task, plus `vu` (accusé de réception)
+// et `fromGoogle` (changement venu de Google Agenda : rien à renvoyer). Un changement d'échéance ou de statut réarme les alertes ;
+// sur une tâche synchronisée (ou qui cesse de l'être), il est marqué à envoyer à Google. Renvoie { error } ou { next }.
 export async function applyTaskUpdate(db, t, a) {
   const f = await taskFields(db, a);
   if (f.error) return f;
@@ -203,8 +204,11 @@ export async function applyTaskUpdate(db, t, a) {
   n.done_at = n.status === "fait" ? (becomesDone ? ts : t.done_at) : null;
   const rearm = n.due_date !== t.due_date || n.due_time !== t.due_time || n.status !== t.status || n.level_id !== t.level_id;
   const ack = a.vu ? 1 : rearm ? 0 : t.alert_ack;
-  await db.prepare("UPDATE tasks SET type_id=?, level_id=?, status=?, due_date=?, due_time=?, recur_every=?, recur_unit=?, done_at=?, alert_last=?, alert_ack=?, updated_at=? WHERE memory_id=?")
-    .bind(n.type_id, n.level_id, n.status, n.due_date, n.due_time, n.recur_every, n.recur_unit, n.done_at, rearm ? null : t.alert_last, ack, ts, t.memory_id).run();
+  const changed = Object.keys(a).some((k) => !["id", "vu", "fromGoogle"].includes(k) && a[k] != null);
+  const syncNew = n.type_id === t.type_id ? t.type_sync : (await db.prepare("SELECT sync FROM task_types WHERE id = ?").bind(n.type_id).first())?.sync;
+  const dirty = a.fromGoogle ? 0 : changed && (t.type_sync === "google" || syncNew === "google") ? 1 : t.gcal_dirty ?? 0;
+  await db.prepare("UPDATE tasks SET type_id=?, level_id=?, status=?, due_date=?, due_time=?, recur_every=?, recur_unit=?, done_at=?, alert_last=?, alert_ack=?, gcal_dirty=?, updated_at=? WHERE memory_id=?")
+    .bind(n.type_id, n.level_id, n.status, n.due_date, n.due_time, n.recur_every, n.recur_unit, n.done_at, rearm ? null : t.alert_last, ack, dirty, ts, t.memory_id).run();
   const titre = a.titre != null ? String(a.titre).trim() : "";
   if (titre || a.detail != null) {
     const title = titre || t.title;

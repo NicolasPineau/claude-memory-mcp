@@ -28,7 +28,7 @@ const WHERE = env.BACKUP_LOCAL === "1" ? "--local" : "--remote";
 const mo = (n) => (n / 1e6).toFixed(2) + " Mo";
 
 // Tables exportées. L'export D1 ne gère pas les tables virtuelles (index FTS5) : l'index est reconstruit
-// par les instructions ajoutées à la fin du fichier. Les jetons temporaires et le cache de consommation sont ignorés.
+// par les instructions ajoutées à la fin du fichier. Les jetons temporaires, le cache de consommation et l'état de la synchro Google (jeton OAuth : tables google_sync, gcal_trash) sont ignorés.
 export const EXPORT_TABLES = ["groups", "projects", "memories", "tags", "memory_tags", "files", "file_chunks", "api_keys", "api_key_rules", "schema_meta", "backup_orphans", "task_types", "task_levels", "tasks", "settings"];
 export const FTS_REBUILD = `
 -- Index (non repris par l'export par table).
