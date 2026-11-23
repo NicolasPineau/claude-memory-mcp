@@ -253,3 +253,12 @@ export function reportTarget(rule, task, at = new Date()) {
   }
   return { date: addDays(p.date, Number(m[5])), time: m[6] != null ? `${pad(+m[6])}:${m[7]}` : task.due_time ?? null };
 }
+
+// Un souvenir de type « tache » créé autrement que par add_task (remember, update_memory, /admin) : ligne de tâche par défaut,
+// sans échéance, pour qu'il soit listé et puisse recevoir échéance et criticité. Sans effet si la ligne existe.
+export async function ensureTaskRow(db, memoryId) {
+  const ts = now();
+  await db.prepare(`INSERT OR IGNORE INTO tasks(memory_id, type_id, level_id, status, gcal_dirty, created_at, updated_at)
+    SELECT m.id, ty.id, (SELECT id FROM task_levels ORDER BY is_default DESC, position, id LIMIT 1), 'a_faire', 0, ?, ?
+    FROM memories m, (SELECT id FROM task_types ORDER BY is_default DESC, position, id LIMIT 1) ty WHERE m.id = ? AND m.kind = 'tache'`).bind(ts, ts, memoryId).run();
+}
