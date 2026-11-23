@@ -9,15 +9,30 @@ export function ftsQuery(text) {
   return terms.slice(0, 20).map((w) => `"${w}"*`).join(" OR ");
 }
 
-export async function getOrCreateProject(db, name) {
+export async function findProject(db, name) {
   if (!name || !String(name).trim()) return null;
-  name = String(name).trim();
-  const row = await db.prepare("SELECT id FROM projects WHERE name = ?").bind(name).first();
-  if (row) return row.id;
+  return db.prepare("SELECT * FROM projects WHERE name = ?").bind(String(name).trim()).first();
+}
+
+export async function createProject(db, name, groupId, { description = "", status = "actif" } = {}) {
   const ts = now();
-  const r = await db.prepare("INSERT INTO projects(name, created_at, updated_at) VALUES (?,?,?)").bind(name, ts, ts).run();
+  const r = await db.prepare("INSERT INTO projects(name, description, status, group_id, created_at, updated_at) VALUES (?,?,?,?,?,?)")
+    .bind(String(name).trim(), description, status, groupId, ts, ts).run();
   return r.meta.last_row_id;
 }
+
+// Déplace un projet, ses souvenirs et ses fichiers (ceux du projet et ceux joints à ses souvenirs) vers un groupe.
+export async function moveProject(db, pid, groupId) {
+  await db.batch([
+    db.prepare("UPDATE projects SET group_id = ?, updated_at = ? WHERE id = ?").bind(groupId, now(), pid),
+    db.prepare("UPDATE memories SET group_id = ? WHERE project_id = ?").bind(groupId, pid),
+    db.prepare("UPDATE files SET group_id = ? WHERE project_id = ? OR memory_id IN (SELECT id FROM memories WHERE project_id = ?)").bind(groupId, pid, pid),
+  ]);
+}
+
+// Aligne les fichiers joints à un souvenir sur le groupe du souvenir.
+export const syncMemoryFiles = (db, mid, groupId) =>
+  db.prepare("UPDATE files SET group_id = ? WHERE memory_id = ?").bind(groupId, mid).run();
 
 export async function memoryTags(db, id) {
   const { results } = await db.prepare(
@@ -66,12 +81,13 @@ export async function deleteMemory(db, id) {
   return del.meta.changes > 0;
 }
 
-export async function summary(db, r, max = 280) {
+export async function summary(db, r, max = 280, acl = null) {
   const tags = await memoryTags(db, r.id);
   let c = String(r.content).trim().replace(/\n/g, " ");
   if (c.length > max) c = c.slice(0, max).trimEnd() + "…";
   const meta = [`#${r.id}`, day(r.updated_at), r.kind];
   if (r.project) meta.push(`projet: ${r.project}`);
+  if (acl && r.group_id) meta.push(`groupe: ${acl.label(r.group_id)}`);
   if (tags.length) meta.push("tags: " + tags.join(", "));
   return `• ${r.title}  [${meta.join(" | ")}]\n  ${c}`;
 }

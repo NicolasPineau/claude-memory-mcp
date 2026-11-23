@@ -10,6 +10,8 @@ Tool names are in English; tool descriptions, parameters and server instructions
 
 - **Memories**: notes with a title, content, optional project and tags, with full-text search (FTS5, accent-insensitive).
 - **Projects**: group memories by project, with a status (`actif`, `en pause`, `termine`, `archive`).
+- **Groups**: every project belongs to a group, in a tree up to 3 levels deep (e.g. `Perso › Scoutisme`, `Pro`). Projects can move between groups with their memories and files.
+- **Access keys**: one connector URL per Claude account, each with read-write, read-only or no access per group, inherited by sub-groups (e.g. your work account only sees `Pro`).
 - **Tags**: free-form thematic tags.
 - **Files**: attach files up to 20 MB, stored in D1 in chunks. Small text files can go through the tools directly; larger ones use short-lived upload links (10 min) and download links (1 h).
 - **Built-in instructions** that tell Claude how to use the memory: list project names once at the start, load a project only when relevant, save nothing mid-conversation, offer a summary at the end, and never store secrets.
@@ -28,6 +30,7 @@ Tool names are in English; tool descriptions, parameters and server instructions
 | `set_project` | Create or update a project |
 | `project_context` | Load a project's context |
 | `list_tags` | List tags |
+| `list_groups` | List the groups this connector can see, with its rights |
 | `attach_file` | Attach a small text file |
 | `prepare_upload` | Get a one-time upload link for a larger or binary file |
 | `read_file` | Read a file or get a download link |
@@ -38,7 +41,7 @@ Tool names are in English; tool descriptions, parameters and server instructions
 
 | Path | Description |
 |---|---|
-| `POST /<MEMORY_SECRET>/mcp` | MCP endpoint (stateless Streamable HTTP, JSON-RPC) |
+| `POST /<key>/mcp` | MCP endpoint (stateless Streamable HTTP, JSON-RPC), with an access key or the master key |
 | `/admin` | Admin UI (Cloudflare Access + JWT verification + email allow-list) |
 | `PUT /upload/<token>` | One-time upload link |
 | `GET /dl/<token>` | Temporary download link |
@@ -104,17 +107,20 @@ The Worker also checks the Access JWT itself (signature, issuer, audience, expir
 
 ### 6. Add the connector in Claude
 
-In Claude, go to **Settings → Connectors → Add custom connector** and enter:
+In `/admin`, open **Groups** to build your tree (existing data starts in `Perso`), then **Keys** to create one key per Claude account and choose what it can see. The connector URL is shown once, when the key is created:
 
 ```
-https://<your-worker>.<subdomain>.workers.dev/<MEMORY_SECRET>/mcp
+https://<your-worker>.<subdomain>.workers.dev/<key>/mcp
 ```
 
-Do the same on every Claude account that should share this memory.
+In Claude, go to **Settings → Connectors → Add custom connector** and paste it. Do this on every Claude account, each with its own key.
+
+`MEMORY_SECRET` is the **master key**: `/<MEMORY_SECRET>/mcp` sees and edits everything. Once every account uses its own key, set the variable `MASTER_KEY_ENABLED` to `false` to turn it off.
 
 ## Security notes
 
-- The MCP endpoint is protected by the secret in its URL, compared in constant time. Treat the full URL like a password.
+- The MCP endpoint is protected by the key in its URL. Access keys are stored only as SHA-256 hashes; the master key is compared in constant time. Treat every connector URL like a password, and revoke a key in `/admin` if it leaks.
+- A key never sees anything outside its groups: out-of-scope items answer exactly like missing ones.
 - Upload and download links are random, single-purpose tokens that expire.
 - Don't store passwords or other secrets in the memory. The built-in instructions also tell Claude not to.
 

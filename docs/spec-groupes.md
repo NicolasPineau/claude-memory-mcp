@@ -1,6 +1,6 @@
 # Feat 1 — Groupes, sous-groupes et clés d'accès
 
-Statut : spec validée en interview le 23/11/2026, à implémenter. Cible : v3.0.0, avec les autres feats.
+Statut : implémentée (branche `feat/groups`). Cible : v3.0.0, avec les autres feats.
 
 ## 1. Besoin
 
@@ -170,6 +170,6 @@ Après le déploiement, côté utilisateur :
 - [ ] La migration sur une base v2 existante ne perd aucune donnée et rattache tout à « Perso ». Un second passage ne change rien.
 - [ ] La clé n'est jamais stockée en clair et n'est affichée qu'une fois.
 
-## 11. Point ouvert
+## 11. Décision d'implémentation
 
-- Clé maîtresse après la transition : on la désactive par une variable (`MASTER_KEY_ENABLED = "false"`), ou on supprime son code ?
+- Clé maîtresse : désactivable par la variable `MASTER_KEY_ENABLED = "false"`. Son code reste, pour pouvoir la réactiver en cas de besoin.

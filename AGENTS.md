@@ -6,16 +6,19 @@ Serveur MCP « mémoire partagée » pour Claude : Cloudflare Worker (JavaScript
 
 | Fichier | Rôle |
 |---|---|
-| `src/index.js` | Point d'entrée : routage `/admin`, `/dl/<jeton>`, `/upload/<jeton>`, `/<MEMORY_SECRET>/mcp` |
+| `src/index.js` | Point d'entrée : routage `/admin`, `/dl/<jeton>`, `/upload/<jeton>`, `/<clé>/mcp` |
 | `src/config.js` | Constantes (version, tailles, durées) et `INSTRUCTIONS` envoyées à Claude |
 | `src/util.js` | Utilitaires purs : dates, tags, base64, réponses JSON, comparaison à temps constant |
-| `src/db/schema.js` | Schéma SQL, créé à la première requête (`ensureSchema`) |
+| `src/db/schema.js` | Schéma SQL et migrations, appliqués à la première requête (`ensureSchema`) |
+| `src/db/groups.js` | Arbre des groupes, droits effectifs (héritage), `Acl` (filtres SQL, résolution d'un groupe par chemin ou nom) |
 | `src/db/memories.js` | Accès aux souvenirs, projets, tags et à l'index FTS5 |
 | `src/files/storage.js` | Fichiers découpés en morceaux, jetons de téléchargement et d'envoi |
 | `src/mcp/protocol.js` | JSON-RPC MCP (Streamable HTTP sans état) : `initialize`, `tools/list`, `tools/call` |
 | `src/mcp/tool-helpers.js` | Annotations (`RO`, `WR`, `DE`) et aides pour les schémas d'entrée |
-| `src/mcp/tools/*.js` | Outils MCP par domaine : `memories`, `projects`, `files` ; `index.js` fixe l'ordre d'exposition |
+| `src/mcp/placement.js` | Où ranger un souvenir ou un fichier (projet, groupe, création de projet) selon les droits |
+| `src/mcp/tools/*.js` | Outils MCP par domaine : `memories`, `projects`, `groups`, `files` ; `index.js` fixe l'ordre d'exposition |
 | `src/auth/access.js` | Vérification du JWT Cloudflare Access pour `/admin` |
+| `src/auth/keys.js` | Clés d'accès (hash SHA-256), clé maîtresse, construction de l'`Acl` d'une requête |
 | `src/admin/` | `/admin` : `index.js` (routage), `api.js` (API JSON), `page.js` (interface HTML) |
 | `test/` | Tests Vitest exécutés dans le runtime Workers, avec une D1 locale |
 
@@ -25,6 +28,8 @@ Serveur MCP « mémoire partagée » pour Claude : Cloudflare Worker (JavaScript
 - Pas de dépendance d'exécution : seulement les API Web et Workers.
 - Toute modification de comportement s'accompagne d'un test dans `test/`.
 - Ne jamais écrire de secret ni d'identifiant réel dans le code ou les tests.
+- Toute requête MCP sur `projects`, `memories` ou `files` filtre par groupe (`acl.sqlIn(...)`) ; toute écriture vérifie `acl.canWrite(...)`. Un élément hors périmètre répond comme s'il n'existait pas.
+- Un changement de schéma passe par `migrate()` dans `src/db/schema.js` (idempotent) et par `SCHEMA_VERSION`.
 
 ## Commandes
 
