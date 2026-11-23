@@ -45,6 +45,7 @@ a{color:var(--acc)}mark{background:#f6d365;color:#1d1d1b;border-radius:3px;paddi
 details summary{cursor:pointer;color:var(--acc);font-weight:600;margin:4px 0}
 </style></head><body>
 <header><h1 id="home">🧠 Mémoire</h1><form id="sf"><input id="sq" type="search" placeholder="Rechercher dans tous les projets…"><button class="p">Chercher</button></form><button id="ngroupes">Groupes</button><button id="ncles">Clés</button><small>${escHtml(email)}</small></header>
+<div id="banner" style="display:none;padding:10px 16px;font-weight:600"></div>
 <div class="wrap"><aside><button class="p" id="newp" style="width:100%">+ Nouveau projet</button><div id="plist"></div></aside><main id="main"></main></div>
 <div id="toast"></div>
 <script>
@@ -170,8 +171,21 @@ $('[data-a="kedit"]',el).onclick=()=>{el.innerHTML='<form>'+keyForm(k)+'<div cla
 f.onsubmit=async(e)=>{e.preventDefault();await api("PATCH","cles/"+k.id,{nom:f.nom.value,groupe_defaut_id:Number(f.defaut.value),regles:readRules(f)});toast("Clé modifiée");clesPage()};$('[data-a="cancel"]',el).onclick=()=>clesPage()};
 $('[data-a="kdel"]',el).onclick=async()=>{if(!confirm("Révoquer la clé « "+k.name+" » ?\\nLe connecteur qui l'utilise cessera immédiatement de fonctionner."))return;await api("DELETE","cles/"+k.id);toast("Clé révoquée");clesPage()}})}
 
-async function home(){state.cur=null;renderList();const t=await api("GET","tags");
-$("#main").innerHTML='<section class="card"><h2>Bienvenue</h2><p>Choisis un projet à gauche, ou cherche dans toute la mémoire.</p><h3>Tags</h3><div>'+(t.tags.map((x)=>'<span class="tag" data-tag="'+esc(x.name)+'">'+esc(x.name)+" ("+x.n+")</span>").join("")||'<span class="empty">Aucun tag.</span>')+"</div></section>";
+// --- consommation (garde-fous) et sauvegardes
+const nf=(n)=>Number(n).toLocaleString("fr-FR",{maximumFractionDigits:2});
+const PER={day:"aujourd'hui",month:"ce mois-ci"};
+function banner(c){const b=$("#banner");let m="",bg="";
+if(c.bloque.length){m="⛔ Quota atteint ("+c.metriques.filter((r)=>c.bloque.includes(r.metric)).map((r)=>r.label).join(", ")+") : les écritures et le connecteur sont bloqués jusqu'à la remise à zéro.";bg="var(--ko)"}
+else if(c.metriques.some((r)=>r.ratio>=0.8)){m="⚠️ Consommation au-delà de 80 % d'un seuil : "+c.metriques.filter((r)=>r.ratio>=0.8).map((r)=>r.label+" "+Math.round(r.ratio*100)+" %").join(", ");bg="#b26a00"}
+else if(!c.configure)m="⚠️ Garde-fous inactifs : configure CF_ACCOUNT_ID et CF_API_TOKEN sur le Worker.",bg="#b26a00";
+else if(c.erreur)m="⚠️ Consommation non vérifiée"+(c.verifie_le?" depuis "+c.verifie_le.slice(11,16)+" UTC":"")+" : "+c.erreur,bg="#b26a00";
+b.textContent=m;b.style.display=m?"block":"none";b.style.background=bg;b.style.color="#fff"}
+function consoHtml(c){return '<section class="card"><h2>Consommation</h2><p class="meta">'+(c.configure?(c.verifie_le?"Vérifiée le "+c.verifie_le.slice(0,16).replace("T"," ")+" UTC (rafraîchie toutes les 5 min).":"Pas encore vérifiée."):"API Analytics non configurée : seule la taille de la base est suivie.")+" Seuils réglables par variables d'environnement.</p>"+
+'<table style="width:100%;border-collapse:collapse"><tr><th align="left">Métrique</th><th align="right">Consommé</th><th align="right">Seuil</th><th align="right">Limite gratuite</th><th align="right">%</th></tr>'+
+c.metriques.map((r)=>'<tr style="'+(r.ratio>=1?"color:var(--ko);font-weight:600":r.ratio>=0.8?"color:#b26a00;font-weight:600":"")+'"><td>'+esc(r.label)+(r.period?' <span class="meta">('+PER[r.period]+")</span>":"")+'</td><td align="right">'+nf(r.value)+esc(r.unit)+'</td><td align="right">'+nf(r.limit)+esc(r.unit)+'</td><td align="right" class="meta">'+nf(r.real)+esc(r.unit)+'</td><td align="right">'+Math.round(r.ratio*100)+" %</td></tr>").join("")+"</table>"+
+"<h3>Sauvegardes</h3>"+(c.sauvegardes===null?'<p class="meta">Bucket R2 non lié, ou consultation suspendue (quota atteint).</p>':c.sauvegardes.length?c.sauvegardes.map((s)=>'<div class="item"><a href="/admin/sauvegardes/'+encodeURIComponent(s.nom)+'">'+esc(s.nom)+'</a> <span class="meta">'+fmt(s.taille)+" · "+esc(s.date.slice(0,16).replace("T"," "))+" UTC</span></div>").join(""):'<p class="empty">Aucune sauvegarde pour l\\'instant.</p>')+"</section>"}
+async function home(){state.cur=null;renderList();const [t,c]=await Promise.all([api("GET","tags"),api("GET","conso")]);banner(c);
+$("#main").innerHTML='<section class="card"><h2>Bienvenue</h2><p>Choisis un projet à gauche, ou cherche dans toute la mémoire.</p><h3>Tags</h3><div>'+(t.tags.map((x)=>'<span class="tag" data-tag="'+esc(x.name)+'">'+esc(x.name)+" ("+x.n+")</span>").join("")||'<span class="empty">Aucun tag.</span>')+"</div></section>"+consoHtml(c);
 $$("#main .tag").forEach((x)=>x.onclick=()=>search("",x.dataset.tag))}
 
 $("#sf").onsubmit=(e)=>{e.preventDefault();const q=$("#sq").value.trim();if(q)search(q)};

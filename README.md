@@ -16,6 +16,8 @@ Tool names are in English; tool descriptions, parameters and server instructions
 - **Files**: attach files up to 20 MB, stored in D1 in chunks. Small text files can go through the tools directly; larger ones use short-lived upload links (10 min) and download links (1 h).
 - **Built-in instructions** that tell Claude how to use the memory: list project names once at the start, load a project only when relevant, save nothing mid-conversation, offer a summary at the end, and never store secrets.
 - **Admin web UI** at `/admin` to browse, edit and upload, protected by Cloudflare Access.
+- **Free-tier guards**: the Worker reads the account's real usage (Workers requests, D1 rows and size, R2 storage and operations) and refuses calls before reaching the free limits. Every MCP response carries a `⚠️ Quota` warning from 80 % of a threshold.
+- **Weekly backups** to a private R2 bucket, through GitHub Actions.
 
 ### MCP tools
 
@@ -123,6 +125,52 @@ In Claude, go to **Settings → Connectors → Add custom connector** and paste 
 - A key never sees anything outside its groups: out-of-scope items answer exactly like missing ones.
 - Upload and download links are random, single-purpose tokens that expire.
 - Don't store passwords or other secrets in the memory. The built-in instructions also tell Claude not to.
+
+## Free-tier guards
+
+Thresholds default to **50 % of the Cloudflare free limits**, to keep a margin if those limits shrink. Each can be changed with a Worker variable, without redeploying:
+
+| Variable | Default | Free limit |
+|---|---|---|
+| `QUOTA_REQUESTS_DAY` | 50,000 | 100,000 Workers requests / day |
+| `QUOTA_D1_READS_DAY` | 2,500,000 | 5,000,000 D1 rows read / day |
+| `QUOTA_D1_WRITES_DAY` | 50,000 | 100,000 D1 rows written / day |
+| `QUOTA_D1_SIZE_MB` | 250 | 500 MB per database |
+| `QUOTA_R2_STORAGE_GB` | 5 | 10 GB-month |
+| `QUOTA_R2_CLASS_A_MONTH` | 500,000 | 1,000,000 / month |
+| `QUOTA_R2_CLASS_B_MONTH` | 5,000,000 | 10,000,000 / month |
+
+- Usage comes from the Cloudflare GraphQL Analytics API, for the **whole account**, cached 5 minutes. Set the variable `CF_ACCOUNT_ID` and the secret `CF_API_TOKEN` (a token with *Account Analytics: Read*) on the Worker. Without them, only the database size is tracked and every response says the guards are inactive.
+- From 80 % of a threshold, every MCP response ends with a `⚠️ Quota` line, which Claude is told to relay, and `/admin` shows a banner.
+- At 100 %, every MCP tool call, download and upload link is refused until the period resets (midnight UTC, or the 1st of the month for R2 operations). `/admin` stays readable but refuses writes.
+- If the Analytics API is down, the last known figures are used and responses say the usage is unverified.
+
+## Backups
+
+Time Travel restores D1 to any minute of the last 7 days on the free plan. For longer, a GitHub Actions workflow (`.github/workflows/backup.yml`) exports the database every Sunday at 02:00 UTC, compresses it and stores it in a private R2 bucket. The data never goes through GitHub: the job log only shows sizes and file names. The backup is skipped (and the job fails) if the usage can't be checked or if it would cross an R2 threshold.
+
+Setup, once:
+
+1. In Cloudflare, enable R2 and create a private bucket `memoire-sauvegardes`. Add a lifecycle rule that deletes objects after 60 days.
+2. Create an API token with *Account Analytics: Read*, *D1: Edit* and *Workers R2 Storage: Edit*.
+3. In the GitHub repository, add the secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Optional repository variables: `BACKUP_DATABASE` (default `memoire`), `BACKUP_BUCKET` (default `memoire-sauvegardes`).
+4. Run the workflow once by hand (**Actions → Sauvegarde hebdomadaire → Run workflow**), first as a dry run.
+5. To list and download backups from `/admin`, uncomment the `[[r2_buckets]]` block in `wrangler.toml`.
+
+GitHub disables scheduled workflows after 60 days without activity in the repository: re-enable it in the Actions tab if needed.
+
+### Restoring
+
+A backup is a complete SQL file, including attached files and the full-text index rebuild:
+
+```sh
+npx wrangler r2 object get memoire-sauvegardes/2026-11-29.sql.gz --file backup.sql.gz --remote
+gunzip backup.sql.gz
+npx wrangler d1 create memoire-restauree
+npx wrangler d1 execute memoire-restauree --remote --file backup.sql
+```
+
+Then point `database_name` and `database_id` in `wrangler.toml` to the new database and deploy. For a mistake made less than 7 days ago, D1 Time Travel is simpler: `npx wrangler d1 time-travel restore memoire --timestamp=<unix time>`.
 
 ## Development
 

@@ -1,5 +1,9 @@
 import { SELF } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
+import { schema } from "./helpers.js";
+
+// Consommation fixée en cache : pas d'appel réel à l'API Analytics pendant les tests.
+beforeAll(schema);
 
 const SECRET = "test-secret-0123456789abcdef";
 let id = 0;

@@ -1,6 +1,7 @@
 import { INSTRUCTIONS, VERSION } from "../config.js";
 import { ensureSchema } from "../db/schema.js";
 import { TOOLS } from "./tools/index.js";
+import { blockedMessage, warningLines } from "../quota/guard.js";
 
 // ------------------------------------------------------------------ protocole MCP (JSON-RPC, Streamable HTTP sans état)
 export const PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
@@ -32,10 +33,13 @@ export async function handleRpc(msg, env, ctx) {
     case "tools/call": {
       const tool = TOOLS[params.name];
       if (!tool) return err(-32602, `Outil inconnu : ${params.name}`);
+      // Garde-fous : refus quand un seuil est atteint, avertissement ajouté à chaque réponse sinon.
+      if (ctx.quota?.blocked.length) return ok({ content: [{ type: "text", text: blockedMessage(ctx.quota) }], isError: true });
       try {
         await ensureSchema(env.DB);
         const text = await tool.run(env.DB, params.arguments || {}, ctx);
-        return ok({ content: [{ type: "text", text }], isError: /^Erreur/.test(text) });
+        const warn = ctx.quota ? warningLines(ctx.quota) : [];
+        return ok({ content: [{ type: "text", text: warn.length ? `${text}\n\n${warn.join("\n")}` : text }], isError: /^Erreur/.test(text) });
       } catch (e) {
         return ok({ content: [{ type: "text", text: `Erreur interne : ${e.message}` }], isError: true });
       }

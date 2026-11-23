@@ -21,3 +21,14 @@ enabled = true
 
 [observability.logs]
 enabled = true
+
+# Sauvegardes (voir docs/spec-sauvegardes-quotas.md). Décommenter UNE FOIS le bucket créé dans R2,
+# sinon le déploiement échoue. Permet de lister et télécharger les sauvegardes depuis /admin.
+# [[r2_buckets]]
+# binding = "BACKUPS"
+# bucket_name = "memoire-sauvegardes"
+
+# Garde-fous de consommation : définir sur le Worker (Settings > Variables and Secrets), pas ici :
+#   CF_ACCOUNT_ID  (variable)  identifiant du compte Cloudflare
+#   CF_API_TOKEN   (secret)    jeton « Account Analytics : Read »
+#   QUOTA_*        (variables, facultatives) seuils, voir src/quota/limits.js

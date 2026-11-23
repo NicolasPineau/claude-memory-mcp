@@ -1,6 +1,6 @@
 # Feat 2 — Sauvegardes automatiques et garde-fous de consommation
 
-Statut : spec arrêtée le 23/11/2026, à implémenter. Cible : v3.0.0.
+Statut : implémentée (branche `feat/backups-quotas`). Cible : v3.0.0.
 
 ## 1. Besoin
 
@@ -103,6 +103,13 @@ Consommation du jour et du mois pour chaque métrique : valeur, seuil, limite r�
 | Seuils | **50 % des limites gratuites** | Marge confortable si les offres gratuites baissent. Réglables à tout moment. |
 | Comportement au seuil | **Tout est refusé** (lectures et écritures) jusqu'à la remise à zéro de la période | C'est la consigne : on compte tout et on refuse dès qu'un seuil est atteint. |
 | Alertes | Ligne « ⚠️ Quota » dans **toutes** les réponses MCP dès 80 % d'un seuil, relayée à l'utilisateur par Claude. Bandeau dans `/admin` à 80 % et à 100 %. Pas d'e-mail maison. | Cloudflare envoie déjà un e-mail quand une limite D1 est atteinte. Inutile d'ajouter un service d'envoi. |
+
+### Écarts constatés à l'implémentation
+
+- **L'export D1 ne gère pas les tables virtuelles** (doc Cloudflare). La sauvegarde exporte donc les vraies tables, puis ajoute à la fin du fichier la recréation des index et la reconstruction de l'index plein texte à partir des souvenirs.
+- **Un export unique de Wrangler ne se réimporte pas** : il mélange création des tables et insertions dans un ordre qui casse les clés étrangères. La sauvegarde exporte le schéma, puis les données, séparément.
+- Un export **bloque les autres requêtes** sur la base pendant qu'il tourne, d'où l'horaire de nuit.
+- L'aller-retour complet (export par le script, puis restauration dans une base vide) a été vérifié en local avec Wrangler : données, accents, fichiers joints, droits des clés, index et recherche plein texte identiques.
 
 ## 7. Prérequis côté Cloudflare (à faire par l'utilisateur)
 

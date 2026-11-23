@@ -25,12 +25,21 @@ export async function call(key, name, args = {}) {
 export async function schema() {
   resetSchemaCache();
   await ensureSchema(env.DB);
-  for (const t of ["file_chunks", "jetons", "memory_tags", "memories_fts", "files", "memories", "projects", "tags", "api_key_rules", "api_keys", "schema_meta"])
+  for (const t of ["file_chunks", "jetons", "memory_tags", "memories_fts", "files", "memories", "projects", "tags", "api_key_rules", "api_keys", "schema_meta", "usage_cache"])
     await env.DB.prepare(`DELETE FROM ${t}`).run();
   // Groupes : des feuilles vers la racine, à cause de la clé étrangère parent_id.
   while ((await env.DB.prepare("DELETE FROM groups WHERE id NOT IN (SELECT parent_id FROM groups WHERE parent_id IS NOT NULL)").run()).meta.changes);
   resetSchemaCache();
   await ensureSchema(env.DB);
+  await usage({});
+}
+
+// Fixe la consommation vue par les garde-fous, sans appel à l'API Analytics (cache « frais » jusqu'en 2100).
+export async function usage(values) {
+  const day = new Date().toISOString().slice(0, 10), month = day.slice(0, 7);
+  await env.DB.prepare("DELETE FROM usage_cache").run();
+  const rows = [["_status", 1, "", 4102444800000], ["_verified", Date.now(), "", Date.now()], ...Object.entries(values).map(([k, v]) => [k, v, k.endsWith("_day") ? day : k.endsWith("_month") ? month : "", Date.now()])];
+  for (const r of rows) await env.DB.prepare("INSERT INTO usage_cache(metric, value, period, updated_at) VALUES (?,?,?,?)").bind(...r).run();
 }
 
 export async function group(name, parentId = null) {
