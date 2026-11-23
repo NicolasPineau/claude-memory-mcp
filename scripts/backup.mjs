@@ -8,6 +8,7 @@
 //   BACKUP_BUCKET     bucket R2 des sauvegardes (défaut : memoire-sauvegardes)
 //   FILES_BUCKET      bucket R2 des fichiers (défaut : memoire-fichiers)
 //   QUOTA_*           seuils de consommation (voir src/quota/limits.js)
+//   BACKUP_FILES_KEEP_DAYS  jours de conservation de la copie d'un fichier supprimé (défaut : 60)
 //   BACKUP_DRY_RUN=1  exporte et vérifie les seuils, sans rien envoyer
 import { execFileSync } from "node:child_process";
 import { statSync } from "node:fs";
@@ -16,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { fetchUsage } from "../src/quota/analytics.js";
+import { planPrune } from "./lib/prune.js";
 import { thresholds } from "../src/quota/limits.js";
 
 const env = process.env;
@@ -27,7 +29,7 @@ const mo = (n) => (n / 1e6).toFixed(2) + " Mo";
 
 // Tables exportées. L'export D1 ne gère pas les tables virtuelles (index FTS5) : l'index est reconstruit
 // par les instructions ajoutées à la fin du fichier. Les jetons temporaires et le cache de consommation sont ignorés.
-export const EXPORT_TABLES = ["groups", "projects", "memories", "tags", "memory_tags", "files", "file_chunks", "api_keys", "api_key_rules", "schema_meta"];
+export const EXPORT_TABLES = ["groups", "projects", "memories", "tags", "memory_tags", "files", "file_chunks", "api_keys", "api_key_rules", "schema_meta", "backup_orphans"];
 export const FTS_REBUILD = `
 -- Index (non repris par l'export par table).
 CREATE UNIQUE INDEX IF NOT EXISTS groups_sibling_name ON groups(COALESCE(parent_id, 0), name COLLATE NOCASE);
@@ -143,6 +145,19 @@ try {
         }
         console.log(`${n} fichier(s) copié(s).`);
       }
+    }
+
+    // 6. Copies de fichiers supprimés : notées à leur première détection, effacées après BACKUP_FILES_KEEP_DAYS jours.
+    const keepDays = Number(env.BACKUP_FILES_KEEP_DAYS) > 0 ? Number(env.BACKUP_FILES_KEEP_DAYS) : 60;
+    const plan = planPrune({ keys: saved, fileIds: files.map((f) => f.id), orphans: sql("SELECT id, since FROM backup_orphans"), keepDays });
+    console.log(`Copies de fichiers supprimés : ${plan.toRecord.length} nouvelle(s), ${plan.toDelete.length} à effacer (plus de ${keepDays} jours).`);
+    if (env.BACKUP_DRY_RUN !== "1") {
+      for (const id of plan.toDelete) wrangler(["r2", "object", "delete", `${BUCKET}/files/${id}`, "--remote"]); // gratuit dans R2
+      const stmts = [
+        ...plan.toRecord.map((id) => `INSERT OR IGNORE INTO backup_orphans(id, since) VALUES ('${id}', ${Date.now()});`),
+        ...plan.toForget.map((id) => `DELETE FROM backup_orphans WHERE id = '${id}';`),
+      ];
+      for (let i = 0; i < stmts.length; i += 50) sql(stmts.slice(i, i + 50).join(" "));
     }
   }
 } catch (e) {

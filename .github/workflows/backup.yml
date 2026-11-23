@@ -38,5 +38,7 @@ jobs:
           BACKUP_DATABASE: ${{ vars.BACKUP_DATABASE }}
           BACKUP_BUCKET: ${{ vars.BACKUP_BUCKET }}
           BACKUP_DRY_RUN: ${{ inputs.essai && '1' || '' }}
+          FILES_BUCKET: ${{ vars.FILES_BUCKET }}
+          BACKUP_FILES_KEEP_DAYS: ${{ vars.BACKUP_FILES_KEEP_DAYS }}
           QUOTA_R2_STORAGE_GB: ${{ vars.QUOTA_R2_STORAGE_GB }}
           QUOTA_R2_CLASS_A_MONTH: ${{ vars.QUOTA_R2_CLASS_A_MONTH }}

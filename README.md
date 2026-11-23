@@ -149,7 +149,7 @@ Thresholds default to **50 % of the Cloudflare free limits**, to keep a margin i
 
 Time Travel restores D1 to any minute of the last 7 days on the free plan. For longer, a GitHub Actions workflow (`.github/workflows/backup.yml`) exports the database every Sunday at 02:00 UTC, compresses it and stores it in a private R2 bucket. The data never goes through GitHub: the job log only shows sizes and file names. The backup is skipped (and the job fails) if the usage can't be checked or if it would cross an R2 threshold.
 
-Each run stores `db/YYYY-MM-DD.sql.gz` (the whole database) and copies the attached files that are not backed up yet to `files/<id>` (once per file: files never change).
+Each run stores `db/YYYY-MM-DD.sql.gz` (the whole database) and copies the attached files that are not backed up yet to `files/<id>` (once per file: files never change). The copy of a deleted file is kept **60 days** after the backup first notices the deletion, then removed, so a file deleted by mistake can still be recovered (`BACKUP_FILES_KEEP_DAYS` repository variable to change it).
 
 Setup, once:
 
