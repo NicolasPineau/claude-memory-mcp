@@ -1,7 +1,7 @@
 import { now } from "../util.js";
 
 // ------------------------------------------------------------------ schéma
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'actif', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
@@ -26,9 +26,13 @@ export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS task_types (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, sync TEXT NOT NULL DEFAULT '', is_default INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS task_levels (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, marker TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0, horizon_days INTEGER NOT NULL DEFAULT 0, alert TEXT NOT NULL DEFAULT 'aucune', alert_from TEXT NOT NULL DEFAULT '07:00', alert_to TEXT NOT NULL DEFAULT '24:00', repeat_minutes INTEGER NOT NULL DEFAULT 0, is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   // Une ligne par tâche, liée à son souvenir (texte, projet, tags, groupe). Échéance en heure de Paris.
-  `CREATE TABLE IF NOT EXISTS tasks (memory_id INTEGER PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE, type_id INTEGER NOT NULL REFERENCES task_types(id), level_id INTEGER NOT NULL REFERENCES task_levels(id), status TEXT NOT NULL DEFAULT 'a_faire' CHECK (status IN ('a_faire', 'silencieux', 'fait', 'annule')), due_date TEXT, due_time TEXT, recur_every INTEGER, recur_unit TEXT, done_at TEXT, alert_last TEXT, alert_ack INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS tasks (memory_id INTEGER PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE, type_id INTEGER NOT NULL REFERENCES task_types(id), level_id INTEGER NOT NULL REFERENCES task_levels(id), status TEXT NOT NULL DEFAULT 'a_faire' CHECK (status IN ('a_faire', 'silencieux', 'fait', 'annule')), due_date TEXT, due_time TEXT, recur_every INTEGER, recur_unit TEXT, done_at TEXT, alert_last TEXT, alert_ack INTEGER NOT NULL DEFAULT 0, gcal_event_id TEXT, gcal_updated TEXT, gcal_dirty INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS tasks_due ON tasks(status, due_date)`,
   `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+  // v7 : synchro Google Agenda (src/google/calendar.js). Une seule ligne ; contient le jeton OAuth : jamais sauvegardée.
+  `CREATE TABLE IF NOT EXISTS google_sync (id INTEGER PRIMARY KEY CHECK (id = 1), refresh_token TEXT, calendar_id TEXT, calendar_name TEXT, sync_token TEXT, group_id INTEGER, project_id INTEGER, level_id INTEGER, duration_minutes INTEGER NOT NULL DEFAULT 60, oauth_state TEXT, oauth_state_exp INTEGER, last_sync TEXT, last_error TEXT)`,
+  // Événements Google à supprimer (souvenir effacé avant d'avoir été synchronisé).
+  `CREATE TABLE IF NOT EXISTS gcal_trash (event_id TEXT PRIMARY KEY, calendar_id TEXT, created_at TEXT NOT NULL)`,
 ];
 
 export const DEFAULT_GROUP = "Perso";
@@ -103,6 +107,15 @@ async function migrate(db) {
   if (version < 6) {
     await addColumn(db, "tasks", "alert_last", "TEXT");
     await addColumn(db, "tasks", "alert_ack", "INTEGER NOT NULL DEFAULT 0");
+  }
+
+  // v7 : synchro Google Agenda. Identifiant de l'événement, date de modification Google vue en dernier, changement local à envoyer.
+  if (version < 7) {
+    await addColumn(db, "tasks", "gcal_event_id", "TEXT");
+    await addColumn(db, "tasks", "gcal_updated", "TEXT");
+    await addColumn(db, "tasks", "gcal_dirty", "INTEGER NOT NULL DEFAULT 0");
+    await db.prepare("CREATE INDEX IF NOT EXISTS tasks_gcal ON tasks(gcal_event_id)").run();
+    await db.prepare("INSERT OR IGNORE INTO google_sync(id) VALUES (1)").run();
   }
 
   await db.prepare("INSERT INTO schema_meta(key, value) VALUES ('version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(String(SCHEMA_VERSION)).run();

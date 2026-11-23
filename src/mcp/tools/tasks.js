@@ -24,8 +24,9 @@ export const TASKS_TOOLS = {
       const r = await db.prepare("INSERT INTO memories(title, content, kind, project_id, group_id, source, created_at, updated_at) VALUES (?,?,'tache',?,?,'',?,?)")
         .bind(titre, detail || titre, place.projectId, place.groupId, ts, ts).run();
       const id = r.meta.last_row_id;
-      await db.prepare("INSERT INTO tasks(memory_id, type_id, level_id, status, due_date, due_time, recur_every, recur_unit, created_at, updated_at) VALUES (?,?,?,'a_faire',?,?,?,?,?,?)")
-        .bind(id, f.type_id ?? await defaultTypeId(db), f.level_id ?? await defaultLevelId(db), f.due_date ?? null, f.due_time ?? null, f.recur_every ?? null, f.recur_unit ?? null, ts, ts).run();
+      const typeId = f.type_id ?? await defaultTypeId(db);
+      await db.prepare("INSERT INTO tasks(memory_id, type_id, level_id, status, due_date, due_time, recur_every, recur_unit, gcal_dirty, created_at, updated_at) VALUES (?,?,?,'a_faire',?,?,?,?,(SELECT sync = 'google' FROM task_types WHERE id = ?),?,?)")
+        .bind(id, typeId, f.level_id ?? await defaultLevelId(db), f.due_date ?? null, f.due_time ?? null, f.recur_every ?? null, f.recur_unit ?? null, typeId, ts, ts).run();
       const tags = normTags(a.tags);
       if (tags.length) await setTags(db, id, tags);
       await reindex(db, id);

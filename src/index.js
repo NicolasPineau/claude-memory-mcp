@@ -13,6 +13,7 @@
 // Sans les trois variables Access, /admin reste fermé (erreur 503).
 //   - secret "NTFY_TOPIC" (facultatif) : topic ntfy privé des alertes de tâches ; variable "PUBLIC_URL" : adresse du Worker,
 //     pour les boutons des notifications ; "NTFY_URL" et "NTFY_TOKEN" (facultatifs) pour un autre serveur ntfy.
+//   - variable "GOOGLE_CLIENT_ID" et secret "GOOGLE_CLIENT_SECRET" (facultatifs) : synchro des rendez-vous avec Google Agenda.
 
 import { handleAdmin } from "./admin/index.js";
 import { ensureSchema } from "./db/schema.js";
@@ -22,6 +23,7 @@ import { blockedMessage, checkQuota } from "./quota/guard.js";
 import { handleRpc } from "./mcp/protocol.js";
 import { handleTaskLink } from "./alerts/link.js";
 import { runAlerts } from "./alerts/ntfy.js";
+import { syncGoogle } from "./google/calendar.js";
 
 // ------------------------------------------------------------------ routage
 export default {
@@ -92,12 +94,15 @@ export default {
   },
 
   // Cron (wrangler.toml, toutes les 15 min) : alertes ntfy des tâches dues. Rien n'est envoyé si un seuil de consommation est atteint.
+  // Puis synchro Google Agenda (src/google/calendar.js), avant les alertes pour qu'un RDV modifié dans Google alerte à la bonne heure.
   async scheduled(controller, env, ctx) {
-    if (!env.DB || !env.NTFY_TOPIC) return;
+    if (!env.DB) return;
     ctx.waitUntil((async () => {
       await ensureSchema(env.DB);
       if ((await checkQuota(env.DB, env)).blocked.length) return;
-      await runAlerts(env.DB, env, { at: new Date(controller.scheduledTime) });
+      const at = new Date(controller.scheduledTime);
+      await syncGoogle(env.DB, env, { at });
+      await runAlerts(env.DB, env, { at });
     })());
   },
 };

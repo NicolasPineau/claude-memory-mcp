@@ -72,7 +72,9 @@ export const touchProject = (db, pid) =>
   pid ? db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").bind(now(), pid).run() : null;
 
 export async function deleteMemory(db, id) {
-  const [del] = await db.batch([
+  const [, del] = await db.batch([
+    // Un rendez-vous déjà envoyé à Google Agenda : son événement sera supprimé à la prochaine synchro.
+    db.prepare("INSERT OR IGNORE INTO gcal_trash(event_id, calendar_id, created_at) SELECT t.gcal_event_id, g.calendar_id, ? FROM tasks t, google_sync g WHERE t.memory_id = ? AND t.gcal_event_id IS NOT NULL AND g.id = 1").bind(now(), id),
     db.prepare("DELETE FROM memories WHERE id = ?").bind(id),
     db.prepare("DELETE FROM memory_tags WHERE memory_id = ?").bind(id),
     db.prepare("DELETE FROM tasks WHERE memory_id = ?").bind(id),

@@ -223,6 +223,7 @@ sec("types-taches","Types de tâche",j.types,"Le type décide de la synchronisat
 '<label>Heure des alertes pour les tâches sans heure</label><input name="alerte_matin" type="time" value="'+esc(j.reglages.alerte_matin)+'" style="max-width:140px">'+
 '<label>Choix du bouton « Repousser » : une ligne « Libellé=règle ». Règles : +1h, +30m (à partir de maintenant), 18:00 (prochaine fois qu\\'il est 18 h), +1j, +7j 08:00 (dans N jours)</label><textarea name="reports">'+esc(j.reglages.reports)+'</textarea>'+
 '<div class="acts"><button class="p">Enregistrer</button></div></form></section>';
+$("#main").insertAdjacentHTML("beforeend",'<section class="card" id="gsec"><h2>Google Agenda</h2><div class="empty">Chargement…</div></section>');googleSection(j);
 $("#regf").onsubmit=async(e)=>{e.preventDefault();const f=e.target;await api("PATCH","reglages",{rappels_max:Number(f.rappels_max.value),alerte_matin:f.alerte_matin.value,reports:f.reports.value});toast("Réglages enregistrés")};
 $$("#main form[data-kind]").forEach((f)=>{const kind=f.dataset.kind,id=f.dataset.id;
 f.onsubmit=async(e)=>{e.preventDefault();await api(id?"PATCH":"POST",kind+(id?"/"+id:""),confData(f));toast(id?"Enregistré":"Ajouté");tachesPage()};
@@ -232,6 +233,23 @@ if(x.n_taches||x.is_default){const c=prompt((x.n_taches?x.n_taches+" tâche(s) u
 const t=others.find((y)=>y.name.toLowerCase()===c.trim().toLowerCase());if(!t){toast("Nom inconnu.",true);return}vers="?vers="+t.id}
 else if(!confirm("Supprimer « "+x.name+" » ?"))return;
 const r=await api("DELETE",kind+"/"+id+vers);toast("Supprimé"+(r.basculees?" ("+r.basculees+" tâche(s) basculée(s))":""));tachesPage()}})}
+
+// --- Google Agenda : connexion, agenda dédié, rangement des RDV créés dans Google
+async function googleSection(conf){const g=await api("GET","google"),el=$("#gsec");
+if(!g.configure){el.innerHTML="<h2>Google Agenda</h2><p class='meta'>Non configuré : ajoute la variable GOOGLE_CLIENT_ID et le secret GOOGLE_CLIENT_SECRET sur le Worker.</p>";return}
+if(!g.connecte){el.innerHTML="<h2>Google Agenda</h2><p>Les tâches de type à synchro « Google Agenda » (rendez-vous) seront synchronisées dans les deux sens, toutes les 15 minutes.</p>"+(g.erreur?'<p style="color:var(--ko)">'+esc(g.erreur)+"</p>":"")+'<div class="acts"><a href="/admin/google/connect"><button class="p">Connecter Google</button></a></div>';return}
+let ag=[];try{ag=(await api("GET","google/agendas")).agendas}catch(_){}
+const lv=conf.niveaux;
+el.innerHTML="<h2>Google Agenda</h2><p class='meta'>Connecté. Dernière synchro : "+(g.derniere_synchro?esc(g.derniere_synchro.slice(0,16).replace("T"," "))+" UTC":"jamais")+"</p>"+(g.erreur?'<p style="color:var(--ko)">'+esc(g.erreur)+"</p>":"")+
+'<form id="gf"><label>Agenda dédié</label><select name="agenda"><option value="">— choisir —</option>'+ag.map((a)=>'<option value="'+esc(a.id)+'"'+(a.id===g.agenda_id?" selected":"")+">"+esc(a.nom)+(a.principal?" (principal)":"")+"</option>").join("")+(g.agenda_id&&!ag.some((a)=>a.id===g.agenda_id)?'<option value="'+esc(g.agenda_id)+'" selected>'+esc(g.agenda_nom||g.agenda_id)+"</option>":"")+"</select>"+
+'<p class="meta">RDV créés directement dans Google :</p><div class="row"><div><label>Groupe</label><select name="groupe_id">'+groupOpts(g.groupe_id,"— groupe par défaut —")+'</select></div><div><label>Projet</label><select name="projet_id">'+projOpts(g.projet_id)+'</select></div><div><label>Criticité</label><select name="niveau_id"><option value="">— par défaut —</option>'+lv.map((l)=>'<option value="'+l.id+'"'+(l.id===g.niveau_id?" selected":"")+">"+esc(l.name)+"</option>").join("")+"</select></div></div>"+
+'<label>Durée des RDV envoyés à Google (minutes)</label><input name="duree" type="number" min="5" max="1440" value="'+esc(g.duree_minutes)+'" style="max-width:120px">'+
+'<div class="acts"><button class="p">Enregistrer</button><button type="button" data-a="gsync">Synchroniser maintenant</button><button type="button" class="d" data-a="gdisc">Déconnecter</button></div></form>';
+const f=$("#gf");f.onsubmit=async(e)=>{e.preventDefault();const o=f.agenda.selectedOptions[0];
+if(g.agenda_id&&f.agenda.value!==g.agenda_id&&!confirm("Changer d'agenda ? Les rendez-vous ouverts y seront recréés ; l'ancien agenda n'est pas vidé."))return;
+await api("PATCH","google",{agenda_id:f.agenda.value,agenda_nom:o?o.textContent:"",groupe_id:f.groupe_id.value?Number(f.groupe_id.value):null,projet_id:f.projet_id.value?Number(f.projet_id.value):null,niveau_id:f.niveau_id.value?Number(f.niveau_id.value):null,duree_minutes:Number(f.duree.value)});toast("Enregistré");googleSection(conf)};
+$('[data-a="gsync"]',f).onclick=async()=>{const r=await api("POST","google/synchro");toast("Synchro : "+r.pulled+" reçu(s), "+r.pushed+" envoyé(s)");googleSection(conf)};
+$('[data-a="gdisc"]',f).onclick=async()=>{if(!confirm("Déconnecter Google ? La synchro s'arrête ; rien n'est supprimé."))return;await api("DELETE","google");toast("Déconnecté");googleSection(conf)}}
 
 // --- consommation (garde-fous) et sauvegardes
 const nf=(n)=>Number(n).toLocaleString("fr-FR",{maximumFractionDigits:2});
@@ -254,6 +272,7 @@ $("#sf").onsubmit=(e)=>{e.preventDefault();const q=$("#sq").value.trim();if(q)se
 $("#home").onclick=home;$("#nfichiers").onclick=()=>fichiersPage();$("#ngroupes").onclick=groupesPage;$("#ncles").onclick=()=>clesPage();$("#ntaches").onclick=tachesPage;
 $("#newp").onclick=()=>{state.cur=null;renderList();$("#main").innerHTML='<section class="card"><h2>Nouveau projet</h2><form id="np"><label>Nom</label><input name="nom" required><div class="row"><div><label>Groupe</label><select name="groupe_id" required>'+groupOpts(null,"— choisir —")+'</select></div><div><label>Statut</label><select name="statut">'+opts(STATUTS,"actif")+'</select></div></div><label>Description</label><textarea name="description" class="big"></textarea><div class="acts"><button class="p">Créer</button></div></form></section>';
 $("#np").onsubmit=async(e)=>{e.preventDefault();const f=e.target;const r=await api("POST","projets",{nom:f.nom.value,groupe_id:Number(f.groupe_id.value),statut:f.statut.value,description:f.description.value});toast("Projet créé");await loadProjets();openProjet(r.id)}};
-loadProjets().then(home).catch(()=>{});
+const gq=new URLSearchParams(location.search).get("google");
+loadProjets().then(()=>{if(gq!==null){history.replaceState(null,"","/admin");toast(gq==="ok"?"Google connecté : choisis l'agenda dédié.":gq,gq!=="ok");tachesPage()}else home()}).catch(()=>{});
 </script></body></html>`;
 }

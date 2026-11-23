@@ -6,7 +6,7 @@ Serveur MCP « mémoire partagée » pour Claude : Cloudflare Worker (JavaScript
 
 | Fichier | Rôle |
 |---|---|
-| `src/index.js` | Point d'entrée : routage `/admin`, `/dl/<jeton>`, `/upload/<jeton>`, `/t/<jeton>`, `/<clé>/mcp` ; `scheduled` (Cron des alertes) |
+| `src/index.js` | Point d'entrée : routage `/admin`, `/dl/<jeton>`, `/upload/<jeton>`, `/t/<jeton>`, `/<clé>/mcp` ; `scheduled` (Cron : synchro Google puis alertes) |
 | `src/config.js` | Constantes (version, tailles, durées) et `INSTRUCTIONS` envoyées à Claude |
 | `src/util.js` | Utilitaires purs : dates, tags, base64, réponses JSON, comparaison à temps constant |
 | `src/db/schema.js` | Schéma SQL et migrations, appliqués à la première requête (`ensureSchema`) |
@@ -15,6 +15,7 @@ Serveur MCP « mémoire partagée » pour Claude : Cloudflare Worker (JavaScript
 | `src/db/tasks.js` | Tâches : dates en heure de Paris, échéances et récurrences, ligne compacte, rappels du début de conversation, réglages (`settings`) |
 | `src/alerts/ntfy.js` | Alertes ntfy des tâches (Cron toutes les 15 min) : plages, relances, liens signés (HMAC, 7 jours) |
 | `src/alerts/link.js` | Liens des notifications `/t/<jeton>` : Fait, Vu, Repousser, Modifier, page mobile |
+| `src/google/calendar.js` | Synchro bidirectionnelle des rendez-vous avec un agenda Google dédié : OAuth, lecture incrémentale (syncToken), envoi des tâches `gcal_dirty`, conflits (la dernière modification gagne) |
 | `src/files/storage.js` | Contenu des fichiers dans R2 (`FILES`, objets `f/<id>`) ; lecture des anciens fichiers restés dans D1 (`storage = 'd1'`) ; jetons de téléchargement et d'envoi |
 | `src/mcp/protocol.js` | JSON-RPC MCP (Streamable HTTP sans état) : `initialize`, `tools/list`, `tools/call` |
 | `src/mcp/tool-helpers.js` | Annotations (`RO`, `WR`, `DE`) et aides pour les schémas d'entrée |

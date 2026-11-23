@@ -13,7 +13,7 @@ const V2 = [
   "INSERT INTO files VALUES ('abc123def456', 'plan.pdf', 'application/pdf', 10, '', NULL, 1, '2026-01-01')",
 ];
 
-describe("migration v2 → v6", () => {
+describe("migration v2 → v7", () => {
   it("rattache tout à Perso sans perte, et un second passage ne change rien", async () => {
     for (const q of V2) await env.DB.prepare(q).run();
     resetSchemaCache();
@@ -36,7 +36,7 @@ describe("migration v2 → v6", () => {
         { id: 2, title: "Idée", project_id: null, group_id: perso.id },
       ],
       files: [{ id: "abc123def456", group_id: perso.id, storage: "d1" }], // contenu encore dans D1, à migrer vers R2
-      version: "6",
+      version: "7",
     });
 
     resetSchemaCache();
