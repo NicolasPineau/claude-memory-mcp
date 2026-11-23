@@ -29,13 +29,14 @@ const mo = (n) => (n / 1e6).toFixed(2) + " Mo";
 
 // Tables exportées. L'export D1 ne gère pas les tables virtuelles (index FTS5) : l'index est reconstruit
 // par les instructions ajoutées à la fin du fichier. Les jetons temporaires et le cache de consommation sont ignorés.
-export const EXPORT_TABLES = ["groups", "projects", "memories", "tags", "memory_tags", "files", "file_chunks", "api_keys", "api_key_rules", "schema_meta", "backup_orphans"];
+export const EXPORT_TABLES = ["groups", "projects", "memories", "tags", "memory_tags", "files", "file_chunks", "api_keys", "api_key_rules", "schema_meta", "backup_orphans", "task_types", "task_levels", "tasks", "settings"];
 export const FTS_REBUILD = `
 -- Index (non repris par l'export par table).
 CREATE UNIQUE INDEX IF NOT EXISTS groups_sibling_name ON groups(COALESCE(parent_id, 0), name COLLATE NOCASE);
 CREATE INDEX IF NOT EXISTS projects_group ON projects(group_id);
 CREATE INDEX IF NOT EXISTS memories_group ON memories(group_id);
 CREATE INDEX IF NOT EXISTS files_group ON files(group_id);
+CREATE INDEX IF NOT EXISTS tasks_due ON tasks(status, due_date);
 -- Index de recherche plein texte, reconstruit à partir des souvenirs (non exportable par D1).
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(title, content, tags, project, tokenize = 'unicode61 remove_diacritics 2');
 DELETE FROM memories_fts;

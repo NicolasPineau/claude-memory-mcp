@@ -75,6 +75,7 @@ export async function deleteMemory(db, id) {
   const [del] = await db.batch([
     db.prepare("DELETE FROM memories WHERE id = ?").bind(id),
     db.prepare("DELETE FROM memory_tags WHERE memory_id = ?").bind(id),
+    db.prepare("DELETE FROM tasks WHERE memory_id = ?").bind(id),
     db.prepare("UPDATE files SET memory_id = NULL WHERE memory_id = ?").bind(id),
     db.prepare("DELETE FROM memories_fts WHERE rowid = ?").bind(id),
   ]);

@@ -1,7 +1,7 @@
 import { now } from "../util.js";
 
 // ------------------------------------------------------------------ schéma
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'actif', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
@@ -22,6 +22,13 @@ export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS backup_orphans (id TEXT PRIMARY KEY, since INTEGER NOT NULL)`,
   // Cache de la consommation du compte (garde-fous, voir src/quota/).
   `CREATE TABLE IF NOT EXISTS usage_cache (metric TEXT PRIMARY KEY, value REAL NOT NULL, period TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL)`,
+  // v5 : tâches. Types (comportement de synchro) et niveaux de criticité (affichage, alertes) administrables dans /admin.
+  `CREATE TABLE IF NOT EXISTS task_types (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, sync TEXT NOT NULL DEFAULT '', is_default INTEGER NOT NULL DEFAULT 0, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS task_levels (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, marker TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0, horizon_days INTEGER NOT NULL DEFAULT 0, alert TEXT NOT NULL DEFAULT 'aucune', alert_from TEXT NOT NULL DEFAULT '07:00', alert_to TEXT NOT NULL DEFAULT '24:00', repeat_minutes INTEGER NOT NULL DEFAULT 0, is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+  // Une ligne par tâche, liée à son souvenir (texte, projet, tags, groupe). Échéance en heure de Paris.
+  `CREATE TABLE IF NOT EXISTS tasks (memory_id INTEGER PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE, type_id INTEGER NOT NULL REFERENCES task_types(id), level_id INTEGER NOT NULL REFERENCES task_levels(id), status TEXT NOT NULL DEFAULT 'a_faire' CHECK (status IN ('a_faire', 'silencieux', 'fait', 'annule')), due_date TEXT, due_time TEXT, recur_every INTEGER, recur_unit TEXT, done_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS tasks_due ON tasks(status, due_date)`,
+  `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 ];
 
 export const DEFAULT_GROUP = "Perso";
@@ -70,6 +77,27 @@ async function migrate(db) {
 
   // v4 : où est rangé le contenu d'un fichier. « d1 » : morceaux base64 dans file_chunks ; « r2 » : objet f/<id> du bucket FILES.
   if (version < 4) await addColumn(db, "files", "storage", "TEXT NOT NULL DEFAULT 'd1'");
+
+  // v5 : tâches. Types et niveaux par défaut (seulement si vides : ils sont ensuite administrables),
+  // case « affiche les rappels » sur les clés, et reprise des souvenirs de type « tache » existants.
+  if (version < 5) {
+    await addColumn(db, "api_keys", "show_reminders", "INTEGER NOT NULL DEFAULT 1");
+    const ts = now();
+    if (!(await db.prepare("SELECT 1 FROM task_types LIMIT 1").first()))
+      await db.batch([
+        db.prepare("INSERT OR IGNORE INTO task_types(name, sync, is_default, position, created_at, updated_at) VALUES ('Tâche', '', 1, 1, ?1, ?1)").bind(ts),
+        db.prepare("INSERT OR IGNORE INTO task_types(name, sync, is_default, position, created_at, updated_at) VALUES ('Rendez-vous', 'google', 0, 2, ?1, ?1)").bind(ts),
+      ]);
+    if (!(await db.prepare("SELECT 1 FROM task_levels LIMIT 1").first()))
+      await db.batch([
+        db.prepare("INSERT OR IGNORE INTO task_levels(name, marker, position, horizon_days, alert, alert_from, alert_to, repeat_minutes, is_default, created_at, updated_at) VALUES ('critique', '!!', 1, 7, 'alarme', '00:00', '24:00', 60, 0, ?1, ?1)").bind(ts),
+        db.prepare("INSERT OR IGNORE INTO task_levels(name, marker, position, horizon_days, alert, alert_from, alert_to, repeat_minutes, is_default, created_at, updated_at) VALUES ('normale', '!', 2, 3, 'notification', '07:00', '24:00', 0, 1, ?1, ?1)").bind(ts),
+        db.prepare("INSERT OR IGNORE INTO task_levels(name, marker, position, horizon_days, alert, alert_from, alert_to, repeat_minutes, is_default, created_at, updated_at) VALUES ('basse', '', 3, 0, 'aucune', '07:00', '24:00', 0, 0, ?1, ?1)").bind(ts),
+      ]);
+    await db.prepare(`INSERT OR IGNORE INTO tasks(memory_id, type_id, level_id, status, created_at, updated_at)
+      SELECT id, (SELECT id FROM task_types ORDER BY is_default DESC, position, id LIMIT 1), (SELECT id FROM task_levels ORDER BY is_default DESC, position, id LIMIT 1), 'a_faire', created_at, updated_at
+      FROM memories WHERE kind = 'tache'`).run();
+  }
 
   await db.prepare("INSERT INTO schema_meta(key, value) VALUES ('version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(String(SCHEMA_VERSION)).run();
 }

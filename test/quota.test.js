@@ -117,7 +117,7 @@ describe("refus et avertissements", () => {
     expect(r.result.content[0].text).toMatch(/^Erreur : quota atteint.*requêtes Workers 50[\s ]000 \/ 50[\s ]000 \(100 %\)/);
     expect((await env.DB.prepare("SELECT COUNT(*) n FROM memories").first()).n).toBe(before);
     expect(await call(MASTER, "recall", {})).toMatch(/quota atteint/);
-    expect((await rpc(MASTER, "tools/list")).result.tools.length).toBe(15); // le connecteur reste chargeable
+    expect((await rpc(MASTER, "tools/list")).result.tools.length).toBe(18); // le connecteur reste chargeable
   });
 
   it("refuse les liens de téléchargement et d'envoi", async () => {
