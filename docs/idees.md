@@ -20,7 +20,7 @@ Périmètre validé avec l'utilisateur lors d'une interview. Priorité : les rap
 
 ### Modèle
 
-- **Tâche** = souvenir avec : type de tâche, niveau de criticité, statut (`a_faire` / `fait` / `annule`), échéance (date + heure facultative), récurrence facultative, `fait_le`.
+- **Tâche** = souvenir avec : type de tâche, niveau de criticité, statut (`a_faire` / `silencieux` / `fait` / `annule`), échéance (date + heure facultative), récurrence facultative, `fait_le`.
 - **Types de tâche**, administrables dans `/admin` (ajout, modification, suppression) : au départ « Tâche » et « Rendez-vous ». Un type porte son comportement de synchro (ex. « Rendez-vous » = synchro avec l'agenda Google dédié).
 - **Niveaux de criticité**, administrables dans `/admin` : au départ critique / normale / basse. Chaque niveau définit :
   - l'horizon d'affichage : combien de jours avant l'échéance la tâche remonte en début de conversation (ex. critique 7 j, normale 3 j, basse 0 j) ;
@@ -69,6 +69,16 @@ Périmètre validé avec l'utilisateur lors d'une interview. Priorité : les rap
 - **Droits des clés** : les tâches suivent les groupes de la clé (règle actuelle). L'interface des clés gagne une case « affiche les rappels » : une clé peut accéder aux tâches sans qu'elles s'affichent d'office au démarrage.
 - **Outils MCP dédiés** : `add_task`, `update_task` (statut, échéance, report, criticité…) et `list_tasks` (filtres : statut, période, criticité, projet).
 - **Plafond au démarrage** : réglable dans `/admin`, **5 par défaut**. Au-delà, une ligne « + N autres » renvoie vers `list_tasks`.
+- **Statut `silencieux`** : statuts possibles `a_faire` / `silencieux` / `fait` / `annule`. Une tâche silencieuse reste à faire et visible dans `list_tasks`, mais ne déclenche aucun rappel : ni au démarrage, ni alerte ntfy. On la réactive en la repassant à `a_faire`.
+
+### Économie de tokens (exigence transverse)
+
+Tout ce que le serveur renvoie à Claude doit être aussi court que possible :
+- **Démarrage** : section « Rappels » omise si elle est vide. Une ligne par tâche, sans le texte complet du souvenir : `#12 !! Appeler le plombier — 25/11 14h` (`!!` critique, `!` normale, rien pour basse ; « retard » si dépassée). Dates courtes, sans l'année si c'est l'année en cours.
+- **`list_tasks`** : même format compact par défaut ; le détail complet seulement via un paramètre explicite ou `read_memory`.
+- **`add_task` / `update_task`** : réponse minimale (`ok #12`, plus la date de l'occurrence suivante pour une récurrence), sans renvoyer la tâche.
+- **Descriptions d'outils et `INSTRUCTIONS`** : phrases courtes, sans exemples superflus (elles sont envoyées à chaque conversation).
+- **Annonce par Claude** : les `INSTRUCTIONS` demandent de reprendre les rappels en une ou deux lignes, sans commentaire.
 
 ### Questions à trancher pour les lots 2 et 3
 
