@@ -66,14 +66,6 @@ export default {
     const ctx = { origin: url.origin, auth, acl: await buildAcl(db, auth) };
     const batch = Array.isArray(body);
     const replies = (await Promise.all((batch ? body : [body]).map((m) => handleRpc(m, env, ctx)))).filter(Boolean);
-    // DIAGNOSTIC TEMPORAIRE (connexion des nouveaux connecteurs) : à retirer. Ne journalise jamais la clé.
-    console.log(JSON.stringify({
-      diag: "mcp", cle: auth.name,
-      methodes: (batch ? body : [body]).map((m) => m && m.method),
-      init: (batch ? body : [body]).filter((m) => m && m.method === "initialize").map((m) => ({ version: m.params?.protocolVersion, client: m.params?.clientInfo, capacites: m.params?.capabilities })),
-      entetes: Object.fromEntries(["accept", "content-type", "mcp-protocol-version", "mcp-session-id", "user-agent", "authorization"].map((h) => [h, h === "authorization" ? (request.headers.has(h) ? "présent" : null) : request.headers.get(h)])),
-      reponses: replies.map((r) => r.error ? { erreur: r.error } : { version: r.result?.protocolVersion }),
-    }));
     if (!replies.length) return new Response(null, { status: 202 });
     return Response.json(batch ? replies : replies[0]);
   },
