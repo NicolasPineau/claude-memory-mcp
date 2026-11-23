@@ -149,6 +149,8 @@ try {
 
     // 6. Copies de fichiers supprimés : notées à leur première détection, effacées après BACKUP_FILES_KEEP_DAYS jours.
     const keepDays = Number(env.BACKUP_FILES_KEEP_DAYS) > 0 ? Number(env.BACKUP_FILES_KEEP_DAYS) : 60;
+    // La table est aussi créée par le Worker à sa première requête : on ne dépend pas de l'ordre des déploiements.
+    sql("CREATE TABLE IF NOT EXISTS backup_orphans (id TEXT PRIMARY KEY, since INTEGER NOT NULL)");
     const plan = planPrune({ keys: saved, fileIds: files.map((f) => f.id), orphans: sql("SELECT id, since FROM backup_orphans"), keepDays });
     console.log(`Copies de fichiers supprimés : ${plan.toRecord.length} nouvelle(s), ${plan.toDelete.length} à effacer (plus de ${keepDays} jours).`);
     if (env.BACKUP_DRY_RUN !== "1") {
