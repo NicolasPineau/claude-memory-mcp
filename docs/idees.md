@@ -56,6 +56,25 @@ Périmètre validé avec l'utilisateur lors d'une interview. Priorité : les rap
 - RDV supprimé dans Google → statut `annule` dans Memory (historique conservé, ne remonte plus).
 - Les RDV ont aussi une criticité et les alertes ntfy correspondantes (les rappels Google peuvent rester actifs en plus).
 
+### Découpage
+
+1. **Lot 1** : modèle, admin des types et niveaux, rappels au démarrage. **Prêt pour le dev** (décisions ci-dessous).
+2. **Lot 2** : alertes ntfy (Cron, actions, page d'édition).
+3. **Lot 3** : synchro Google Agenda.
+
+### Décisions du lot 1 (23/11/2026)
+
+- **Stockage** : table dédiée `taches` (statut, échéance, heure facultative, criticité, type, récurrence, `fait_le`), liée à son souvenir (texte, projet, tags, groupe). Les types et niveaux vont dans leurs propres tables, administrables.
+- **Récurrence** : une ligne par occurrence. L'occurrence cochée reste `fait` avec sa date, et une nouvelle ligne est créée pour la suivante (historique complet).
+- **Droits des clés** : les tâches suivent les groupes de la clé (règle actuelle). L'interface des clés gagne une case « affiche les rappels » : une clé peut accéder aux tâches sans qu'elles s'affichent d'office au démarrage.
+- **Outils MCP dédiés** : `add_task`, `update_task` (statut, échéance, report, criticité…) et `list_tasks` (filtres : statut, période, criticité, projet).
+- **Plafond au démarrage** : réglable dans `/admin`, **5 par défaut**. Au-delà, une ligne « + N autres » renvoie vers `list_tasks`.
+
+### Questions à trancher pour les lots 2 et 3
+
+- Lot 2 : ntfy.sh public (topic secret) ou instance auto-hébergée, authentification ; précision du Cron (1 ou 5 min) ; fuseau horaire (échéances en Europe/Paris, Cron en UTC, heure d'été) ; « Reporter » modifie l'échéance ou un champ « prochaine alerte » ; répétition d'une alarme ignorée.
+- Lot 3 : mise en place d'OAuth (projet Google Cloud, consentement, refresh token depuis `/admin`) ; criticité, projet et groupe par défaut d'un RDV créé directement dans Google.
+
 ### Points ouverts
 
 - Synchro Google : webhook `watch` (temps réel, canal à renouveler) ou interrogation périodique par le Cron (plus simple, quelques minutes de délai).
