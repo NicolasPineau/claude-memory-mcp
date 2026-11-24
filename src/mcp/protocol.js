@@ -26,10 +26,14 @@ export async function handleRpc(msg, env, ctx) {
     }
     case "ping":
       return ok({});
-    case "tools/list":
-      return ok({
-        tools: Object.entries(TOOLS).map(([name, t]) => ({ name, description: t.description, inputSchema: t.inputSchema, annotations: t.annotations })),
-      });
+    case "tools/list": {
+      // Certaines descriptions dépendent des données (ex. noms des niveaux de criticité, administrables) : `describe(db)`.
+      await ensureSchema(env.DB);
+      const tools = [];
+      for (const [name, t] of Object.entries(TOOLS))
+        tools.push({ name, description: t.describe ? await t.describe(env.DB) : t.description, inputSchema: t.inputSchema, annotations: t.annotations });
+      return ok({ tools });
+    }
     case "tools/call": {
       const tool = TOOLS[params.name];
       if (!tool) return err(-32602, `Outil inconnu : ${params.name}`);
