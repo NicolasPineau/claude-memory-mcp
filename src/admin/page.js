@@ -42,11 +42,13 @@ button.p{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:60
 a{color:var(--acc)}mark{background:#f6d365;color:#1d1d1b;border-radius:3px;padding:0 2px}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);padding:10px 16px;border-radius:8px;background:var(--txt);color:var(--bg);display:none;z-index:9}
 .empty{color:var(--mut);font-style:italic}progress{width:100%;margin-top:8px;display:none}
+
+.chip{display:inline-block;font-size:.75rem;padding:1px 8px;border-radius:99px;background:var(--bg);border:1px dashed var(--acc);margin:4px 4px 0 0;cursor:pointer}
 details summary{cursor:pointer;color:var(--acc);font-weight:600;margin:4px 0}
 </style></head><body>
 <header><h1 id="home">🧠 Mémoire</h1><form id="sf"><input id="sq" type="search" placeholder="Rechercher dans tous les projets…"><button class="p">Chercher</button></form><button id="nfichiers">Fichiers</button><button id="ngroupes">Groupes</button><button id="ntaches">Tâches</button><button id="ncles">Clés</button><small>${escHtml(email)}</small></header>
 <div id="banner" style="display:none;padding:10px 16px;font-weight:600"></div>
-<div class="wrap"><aside><button class="p" id="newp" style="width:100%">+ Nouveau projet</button><div id="plist"></div></aside><main id="main"></main></div>
+<div class="wrap"><aside><button class="p" id="newp" style="width:100%">+ Nouveau projet</button><input id="pfilter" type="search" placeholder="Filtrer les projets…" autocomplete="off" style="margin-top:8px"><div id="plist"></div></aside><main id="main"></main></div>
 <div id="toast"></div>
 <script>
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
@@ -64,22 +66,36 @@ const opts=(list,cur)=>list.map((v)=>'<option'+(v===cur?" selected":"")+">"+esc(
 const projOpts=(cur)=>'<option value="">— aucun projet —</option>'+state.projets.map((p)=>'<option value="'+p.id+'"'+(p.id===cur?" selected":"")+">"+esc(p.name)+" ("+esc(gpath(p.group_id))+")</option>").join("");
 const groupOpts=(cur,empty)=>(empty?'<option value="">'+esc(empty)+"</option>":"")+state.groupes.map((g)=>'<option value="'+g.id+'"'+(g.id===cur?" selected":"")+">"+esc(g.chemin)+"</option>").join("");
 
-async function loadProjets(){const [g,j,tc]=await Promise.all([api("GET","groupes"),api("GET","projets"),api("GET","taches-config")]);state.tconf=tc;state.groupes=g.groupes;state.maxDepth=g.profondeur_max;state.projets=j.projets;state.sans=j.sans_projet;renderList()}
-function renderList(){const act=state.projets.filter((p)=>p.status!=="archive"),arc=state.projets.filter((p)=>p.status==="archive");
+async function loadProjets(){const [g,j,tc,tg]=await Promise.all([api("GET","groupes"),api("GET","projets"),api("GET","taches-config"),api("GET","tags")]);state.tconf=tc;state.tags=tg.tags;state.groupes=g.groupes;state.maxDepth=g.profondeur_max;state.projets=j.projets;state.sans=j.sans_projet;renderList()}
+// Recherche sans accents ni majuscules.
+const norm=(x)=>String(x??"").normalize("NFD").replace(/[\\u0300-\\u036f]/g,"").toLowerCase();
+function renderList(){const f=norm(state.filter||"").trim(),hit=(p)=>!f||norm(p.name).includes(f)||norm(gpath(p.group_id)).includes(f);
+const act=state.projets.filter((p)=>p.status!=="archive"&&hit(p)),arc=state.projets.filter((p)=>p.status==="archive"&&hit(p));
 const li=(p,lab)=>'<li data-k="p:'+p.id+'" class="'+(state.cur==="p:"+p.id?"sel ":"")+(p.status==="archive"?"arch":"")+'"><span>'+esc(lab||p.name)+'</span><span class="n">'+p.n_souvenirs+(p.n_fichiers?" · "+p.n_fichiers+" 📎":"")+"</span></li>";
-let h="";for(const g of state.groupes){const ps=act.filter((p)=>p.group_id===g.id),o=state.sans.find((x)=>x.group_id===g.id);
+let h="";for(const g of state.groupes){const ps=act.filter((p)=>p.group_id===g.id),o=f?null:state.sans.find((x)=>x.group_id===g.id);if(f&&!ps.length)continue;
 h+='<h3 style="padding-left:'+(g.niveau-1)*12+'px" title="'+esc(g.chemin)+'">'+esc(g.nom)+'</h3><ul style="margin-left:'+(g.niveau-1)*12+'px">'+ps.map((p)=>li(p)).join("")+
 (o?'<li data-k="o:'+g.id+'" class="'+(state.cur==="o:"+g.id?"sel":"")+'"><span><i>Sans projet</i></span><span class="n">'+o.n_souvenirs+(o.n_fichiers?" · "+o.n_fichiers+" 📎":"")+"</span></li>":"")+
 (!ps.length&&!o?'<li class="empty">Vide</li>':"")+"</ul>"}
-if(arc.length)h+="<h3>Archivés</h3><ul>"+arc.map((p)=>li(p,p.name+" — "+gpath(p.group_id))).join("")+"</ul>";$("#plist").innerHTML=h;
+if(arc.length)h+="<h3>Archivés</h3><ul>"+arc.map((p)=>li(p,p.name+" — "+gpath(p.group_id))).join("")+"</ul>";if(f&&!h)h='<p class="empty" style="padding:8px">Aucun projet.</p>';$("#plist").innerHTML=h;
 $$("#plist li[data-k]").forEach((l)=>l.onclick=()=>{const [t,id]=l.dataset.k.split(":");t==="p"?openProjet(Number(id)):openOrphans(Number(id))})}
 
+// Suggestions de tags : pendant la saisie, les tags existants qui correspondent ; champ vide, les plus utilisés du projet.
+function bindTagSuggest(root){$$('input[name="tags"]',root).forEach((inp)=>{const box=inp.nextElementSibling;if(!box||!box.hasAttribute("data-tagsug"))return;let list=[];
+const parts=()=>inp.value.split(","),cur=()=>norm(parts().pop().trim());
+const render=()=>{const ps=parts(),c=cur(),have=new Set(ps.slice(0,-1).map((x)=>norm(x.trim())));let lab;
+if(c){list=(state.tags||[]).filter((t)=>norm(t.name).includes(c)&&!have.has(norm(t.name))&&norm(t.name)!==c).sort((a,b)=>(norm(b.name).startsWith(c)-norm(a.name).startsWith(c))||b.n-a.n).slice(0,8);lab="Suggestions"}
+else{const pt=(state.projTags||[]).filter((t)=>!have.has(norm(t.name)));list=(pt.length?pt:(state.tags||[]).filter((t)=>!have.has(norm(t.name)))).slice(0,8);lab=pt.length?"Fréquents dans ce projet":"Les plus utilisés"}
+box.innerHTML=list.length?'<span class="meta">'+lab+" : </span>"+list.map((t)=>'<span class="chip" data-sug="'+esc(t.name)+'">'+esc(t.name)+"</span>").join(""):""};
+const pick=(name)=>{const ps=parts();ps[ps.length-1]=name;inp.value=ps.map((x)=>x.trim()).filter(Boolean).join(", ")+", ";inp.focus();render()};
+box.onmousedown=(e)=>{const c=e.target.closest("[data-sug]");if(c){e.preventDefault();pick(c.dataset.sug)}};
+inp.addEventListener("input",render);inp.addEventListener("focus",render);
+inp.addEventListener("keydown",(e)=>{if((e.key==="Enter"||e.key==="Tab")&&cur()&&list.length){e.preventDefault();pick(list[0].name)}});render()})}
 function taskFields(t){t=t||{};const c=state.tconf||{niveaux:[],types:[]},dl=c.niveaux.find((l)=>l.is_default),dt=c.types.find((x)=>x.is_default);
 const sel=(n,list,cur)=>'<select name="'+n+'">'+list.map((x)=>"<option"+(x.name===cur?" selected":"")+">"+esc(x.name)+"</option>").join("")+"</select>";
 return '<fieldset data-task style="border:1px solid var(--bd);border-radius:8px;margin-top:10px;padding:4px 12px 10px"><legend class="meta">Tâche</legend><div class="row"><div><label>Date</label><input name="t_date" type="date" value="'+esc(t.date||"")+'"></div><div><label>Heure (facultative)</label><input name="t_heure" type="time" value="'+esc(t.heure||"")+'"></div><div><label>Criticité</label>'+sel("t_crit",c.niveaux,t.criticite||(dl&&dl.name))+"</div></div>"+
 '<div class="row"><div><label>Type</label>'+sel("t_type",c.types,t.type||(dt&&dt.name))+'</div><div><label>Statut</label><select name="t_statut">'+Object.keys(TSTAT).map((k)=>'<option value="'+k+'"'+((t.statut||"a_faire")===k?" selected":"")+">"+TSTAT[k]+"</option>").join("")+'</select></div><div><label>Récurrence (ex. 1 mois)</label><input name="t_rec" value="'+esc(t.recurrence||"")+'"></div></div></fieldset>'}
 function memForm(m,pid,gid){m=m||{};return '<label>Titre</label><input name="titre" value="'+esc(m.title)+'" required><label>Contenu</label><textarea name="contenu" class="big" required>'+esc(m.content)+'</textarea>'+
-'<div class="row"><div><label>Tags (séparés par des virgules)</label><input name="tags" value="'+esc((m.tags||[]).join(", "))+'"></div><div><label>Type</label><select name="type">'+opts(TYPES,m.kind||"note")+'</select></div></div>'+
+'<div class="row"><div><label>Tags (séparés par des virgules)</label><input name="tags" autocomplete="off" value="'+esc((m.tags||[]).join(", "))+'"><div data-tagsug></div></div><div><label>Type</label><select name="type">'+opts(TYPES,m.kind||"note")+'</select></div></div>'+
 '<div class="row"><div><label>Projet</label><select name="projet_id">'+projOpts(pid)+'</select></div><div><label>Groupe (si aucun projet)</label><select name="groupe_id">'+groupOpts(gid)+"</select></div></div>"+taskFields(m.tache)}
 const memData=(f)=>{const o={titre:f.titre.value,contenu:f.contenu.value,type:f.type.value,projet_id:f.projet_id.value?Number(f.projet_id.value):null,groupe_id:Number(f.groupe_id.value),tags:f.tags.value.split(",").map((s)=>s.trim()).filter(Boolean)};
 if(o.type==="tache")o.tache={echeance:f.t_date.value?f.t_date.value+(f.t_heure.value?" "+f.t_heure.value:""):"",criticite:f.t_crit.value,type:f.t_type.value,statut:f.t_statut.value,recurrence:f.t_rec.value};return o};
@@ -108,7 +124,8 @@ h+='</section><section class="card"><details><summary>+ Ajouter un souvenir (tex
 '<details><summary>+ Joindre des fichiers</summary><form id="ff"><label>Fichier(s) — '+(MAX/1048576)+' Mo max chacun</label><input type="file" name="fichier" multiple required><label>Description</label><input name="description" placeholder="Facultatif"><div class="acts"><button class="p">Envoyer</button></div><progress max="100" value="0"></progress></form></details></section>'+
 '<section class="card"><h3 style="margin-top:0">Souvenirs ('+j.souvenirs.length+')</h3><div id="mems">'+(j.souvenirs.map(memItem).join("")||'<p class="empty">Aucun souvenir.</p>')+"</div>"+
 "<h3>Fichiers ("+j.fichiers.length+')</h3><div id="files">'+(j.fichiers.map(fileItem).join("")||'<p class="empty">Aucun fichier.</p>')+"</div></section>";
-$("#main").innerHTML=h;bindTaskToggle($("#main"));const mems=Object.fromEntries(j.souvenirs.map((s)=>[s.id,s])),files=Object.fromEntries(j.fichiers.map((f)=>[f.id,f]));
+const cnt={};for(const x of j.souvenirs)for(const t of x.tags)cnt[t]=(cnt[t]||0)+1;state.projTags=Object.entries(cnt).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).map(([name,n])=>({name,n}));
+$("#main").innerHTML=h;bindTaskToggle($("#main"));bindTagSuggest($("#main"));const mems=Object.fromEntries(j.souvenirs.map((s)=>[s.id,s])),files=Object.fromEntries(j.fichiers.map((f)=>[f.id,f]));
 if(p){$("#pf").onsubmit=async(e)=>{e.preventDefault();const f=e.target,ng=Number(f.groupe_id.value);
 if(ng!==p.group_id&&!confirm("Déplacer « "+p.name+" » vers "+gpath(ng)+" ?\\nSes souvenirs et fichiers suivent. Les clés qui n'ont pas accès à ce groupe ne le verront plus."))return;
 await api("PATCH","projets/"+p.id,{nom:f.nom.value,statut:f.statut.value,description:f.description.value,groupe_id:ng});toast("Projet enregistré");await loadProjets();reload()};
@@ -127,7 +144,7 @@ bindItems(mems,files,reload)}
 function bindItems(mems,files,reload){
 $$("#main [data-mid]").forEach((el)=>{const s=mems[el.dataset.mid];if(!s)return;
 $('[data-a="edit"]',el)&&($('[data-a="edit"]',el).onclick=()=>{el.innerHTML='<form>'+memForm(s,s.project_id,s.group_id)+'<div class="acts"><button class="p">Enregistrer</button><button type="button" data-a="cancel">Annuler</button></div></form>';
-bindTaskToggle(el);$("form",el).onsubmit=async(e)=>{e.preventDefault();await api("PATCH","souvenirs/"+s.id,memData(e.target));toast("Souvenir modifié");await loadProjets();reload()};$('[data-a="cancel"]',el).onclick=reload});
+bindTaskToggle(el);bindTagSuggest(el);$("form",el).onsubmit=async(e)=>{e.preventDefault();await api("PATCH","souvenirs/"+s.id,memData(e.target));toast("Souvenir modifié");await loadProjets();reload()};$('[data-a="cancel"]',el).onclick=reload});
 $('[data-a="del"]',el)&&($('[data-a="del"]',el).onclick=async()=>{if(!confirm("Supprimer définitivement « "+s.title+" » ?"))return;await api("DELETE","souvenirs/"+s.id);toast("Souvenir supprimé");await loadProjets();reload()})});
 $$("#main [data-fid]").forEach((el)=>{const f=files[el.dataset.fid];if(!f)return;
 $('[data-a="fedit"]',el).onclick=()=>{el.innerHTML='<form><div class="row"><div><label>Nom</label><input name="nom" value="'+esc(f.filename)+'"></div><div><label>Projet</label><select name="projet_id">'+projOpts(f.project_id)+'</select></div><div><label>Groupe (si aucun projet)</label><select name="groupe_id">'+groupOpts(f.group_id)+'</select></div></div><label>Description</label><input name="description" value="'+esc(f.description)+'"><div class="acts"><button class="p">Enregistrer</button><button type="button" data-a="cancel">Annuler</button></div></form>';
@@ -136,7 +153,7 @@ $('[data-a="fdel"]',el).onclick=async()=>{if(!confirm("Supprimer définitivement
 $$("#main .tag").forEach((t)=>t.onclick=()=>search("",t.dataset.tag))}
 
 const hl=(s)=>esc(s).replace(/\\u0001/g,"<mark>").replace(/\\u0002/g,"</mark>");
-async function search(q,tag){state.cur=null;renderList();const qs=new URLSearchParams();if(q)qs.set("q",q);if(tag)qs.set("tag",tag);
+async function search(q,tag){state.cur=null;state.projTags=[];renderList();const qs=new URLSearchParams();if(q)qs.set("q",q);if(tag)qs.set("tag",tag);
 const j=await api("GET","recherche?"+qs);
 let h='<section class="card"><h2>Recherche : '+esc(q||"")+(tag?' <span class="tag">'+esc(tag)+"</span>":"")+"</h2>";
 if(j.projets.length)h+="<h3>Projets ("+j.projets.length+")</h3>"+j.projets.map((p)=>'<div class="item"><a href="#" data-p="'+p.id+'" class="t">'+esc(p.name)+'</a> <span class="meta">'+esc(p.status)+" · "+esc(gpath(p.group_id))+"</span>"+(p.description?'<div class="meta">'+esc(p.description.slice(0,200))+"</div>":"")+"</div>").join("");
@@ -279,6 +296,8 @@ $("#main").innerHTML='<section class="card"><h2>Bienvenue</h2><p>Choisis un proj
 $$("#main .tag").forEach((x)=>x.onclick=()=>search("",x.dataset.tag))}
 
 $("#sf").onsubmit=(e)=>{e.preventDefault();const q=$("#sq").value.trim();if(q)search(q)};
+$("#pfilter").oninput=(e)=>{state.filter=e.target.value;renderList()};
+$("#pfilter").onkeydown=(e)=>{if(e.key==="Escape"){e.target.value="";state.filter="";renderList()}else if(e.key==="Enter"){const l=$$("#plist li[data-k]");if(l.length===1)l[0].click()}};
 $("#home").onclick=home;$("#nfichiers").onclick=()=>fichiersPage();$("#ngroupes").onclick=groupesPage;$("#ncles").onclick=()=>clesPage();$("#ntaches").onclick=tachesPage;
 $("#newp").onclick=()=>{state.cur=null;renderList();$("#main").innerHTML='<section class="card"><h2>Nouveau projet</h2><form id="np"><label>Nom</label><input name="nom" required><div class="row"><div><label>Groupe</label><select name="groupe_id" required>'+groupOpts(null,"— choisir —")+'</select></div><div><label>Statut</label><select name="statut">'+opts(STATUTS,"actif")+'</select></div></div><label>Description</label><textarea name="description" class="big"></textarea><div class="acts"><button class="p">Créer</button></div></form></section>';
 $("#np").onsubmit=async(e)=>{e.preventDefault();const f=e.target;const r=await api("POST","projets",{nom:f.nom.value,groupe_id:Number(f.groupe_id.value),statut:f.statut.value,description:f.description.value});toast("Projet créé");await loadProjets();openProjet(r.id)}};
