@@ -195,3 +195,15 @@ describe("souvenirs de type « tache » hors add_task", () => {
     expect(view.souvenirs.find((s) => s.id === r.id).tache).toMatchObject({ statut: "a_faire", date: "2026-12-01", heure: "09:30", criticite: "critique", type: "Tâche" });
   });
 });
+
+describe("descriptions des outils", () => {
+  it("listent les niveaux et types actuels", async () => {
+    const { rpc } = await import("./helpers.js");
+    const tools = (await rpc(MASTER, "tools/list")).result.tools;
+    const add = tools.find((t) => t.name === "add_task").description;
+    expect(add).toContain("Criticités : critique | normale | basse. Types : Tâche | Rendez-vous.");
+    expect(tools.find((t) => t.name === "list_tasks").description).toContain("Criticités : critique | normale | basse.");
+    await admin("POST", "niveaux", { nom: "urgent", position: 0 });
+    expect((await rpc(MASTER, "tools/list")).result.tools.find((t) => t.name === "update_task").description).toContain("Criticités : urgent | critique | normale | basse.");
+  });
+});

@@ -5,10 +5,17 @@ import { RO, WR, groupeArg, int, str, strList } from "../tool-helpers.js";
 import { normTags, now } from "../../util.js";
 
 // Réponses volontairement très courtes : chaque caractère renvoyé coûte des tokens à Claude.
+
+// Noms actuels des niveaux et des types (administrables), ajoutés aux descriptions des outils.
+async function taskVocabulary(db) {
+  const names = async (table) => (await db.prepare(`SELECT name FROM ${table} ORDER BY position, id`).all()).results.map((r) => r.name).join(" | ");
+  return ` Criticités : ${await names("task_levels")}. Types : ${await names("task_types")}.`;
+}
 const ECHEANCE = "AAAA-MM-JJ ou AAAA-MM-JJ HH:MM (heure de Paris)";
 
 export const TASKS_TOOLS = {
   add_task: {
+    async describe(db) { return this.description + await taskVocabulary(db); },
     description: `Crée une tâche (rappel) quand l'utilisateur le demande. \`echeance\` : ${ECHEANCE}. \`criticite\` et \`type\` : noms définis dans /admin (défaut si absents). \`recurrence\` : « 1 mois », « 2 semaines »… (échéance requise). Rangement comme remember.`,
     annotations: WR,
     inputSchema: { type: "object", required: ["titre"], properties: { titre: str("Intitulé court"), detail: str("Détail facultatif"), echeance: str("Échéance"), criticite: str("Niveau de criticité"), type: str("Type de tâche"), recurrence: str("Récurrence"), projet: str("Projet"), groupe: groupeArg(), tags: strList("Tags") } },
@@ -36,6 +43,7 @@ export const TASKS_TOOLS = {
   },
 
   update_task: {
+    async describe(db) { return this.description + await taskVocabulary(db); },
     description: `Modifie une tâche : seuls les champs fournis changent. \`statut\` : a_faire | silencieux (plus aucun rappel) | fait | annule. Une tâche récurrente passée à « fait » crée l'occurrence suivante. \`echeance\` (${ECHEANCE}) ou \`recurrence\` vides = retirées.`,
     annotations: WR,
     inputSchema: { type: "object", required: ["id"], properties: { id: int("Numéro de la tâche"), statut: str("Statut"), titre: str("Nouvel intitulé"), detail: str("Nouveau détail"), echeance: str("Échéance"), criticite: str("Criticité"), type: str("Type"), recurrence: str("Récurrence") } },
@@ -51,6 +59,7 @@ export const TASKS_TOOLS = {
   },
 
   list_tasks: {
+    async describe(db) { return this.description + ` Criticités : ${(await db.prepare("SELECT name FROM task_levels ORDER BY position, id").all()).results.map((r) => r.name).join(" | ")}.`; },
     description: "Liste les tâches, une ligne chacune. `statut` : ouvertes (défaut : a_faire + silencieux) | a_faire | silencieux | fait | annule | toutes. `jours` : échéance d'ici N jours (retards compris). Filtres : `criticite`, `projet`, `groupe`. `detail: true` ajoute niveau, projet et texte.",
     annotations: RO,
     inputSchema: { type: "object", properties: { statut: str("Statut"), jours: int("Échéance d'ici N jours"), criticite: str("Criticité"), projet: str("Projet"), groupe: groupeArg("Limiter à ce groupe et ses sous-groupes"), detail: { type: "boolean", description: "Plus de détails" }, limite: int("Nombre max (défaut 20, max 100)") } },
